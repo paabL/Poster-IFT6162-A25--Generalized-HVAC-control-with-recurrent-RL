@@ -20,9 +20,9 @@ CFG = dict(
     n_envs=4,
     seed=0,
     fixed_model_idx=None,
-    total_timesteps=3_000_000,
-    model_path="Pre_ppo_rc5_1FA_LSTM_HE.zip",
-    vecnorm_path="vecnormalize_stats_1FA_LSTM_HE.pkl",
+    total_timesteps=1_000_000,
+    model_path="Pre_ppo_rc5_1FA_LSTM.zip",
+    vecnorm_path="vecnormalize_stats_1FA_LSTM.pkl",
 )
 
 ENV_CFG = dict(
@@ -35,13 +35,13 @@ ENV_CFG = dict(
     # Augmenter `w_comfort` => plus de confort (moins de violations), souvent + d'énergie.
     # Augmenter `w_energy`  => moins d'énergie, souvent + d'inconfort.
     w_energy=2.0,
-    w_comfort=1.0, #Par default 5.0
+    w_comfort=1.0, 
     # Adoucit la pénalité confort près de 0 (Huber, en Kelvin).
     # Si comfort_huber_k > 0, une petite violation est moins pénalisée (évite que l'agent "ait peur" d'approcher).
     comfort_huber_k=0.5,
     w_sat=0.2,
-    w_u=1.0/2*0,
-    w_tz=1.0/(273.15*5)*0,
+    w_u=1.0/2*0, #Pas utilisé
+    w_tz=1.0/(273.15*5)*0, #Pas utilisé
     render_episodes=True,
     max_episode_length=24 * 7,
     excluding_periods=[(28 * 24 * 3600, 36 * 24 * 3600)],
