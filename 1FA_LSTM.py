@@ -63,7 +63,7 @@ EXTRACTOR_CFG = dict(
 
 PPO_LR_START = 1e-4
 PPO_LR_END = 5e-5
-SAVE_EVERY_STEPS = 1_000_000
+SAVE_EVERY_STEPS = 500_000
 
 
 def lr_schedule(progress_remaining: float) -> float:
