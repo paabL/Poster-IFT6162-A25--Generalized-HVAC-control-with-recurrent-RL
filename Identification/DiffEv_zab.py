@@ -8,7 +8,7 @@ import jax.numpy as jnp
 import numpy as np
 from scipy.optimize import differential_evolution
 
-# Ajout du repo root au PYTHONPATH pour les imports locaux
+# Add repo root to PYTHONPATH for local imports
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -31,7 +31,7 @@ from Identification.Models import (
 
 
 def optimize_theta_initial_zab(popsize=8, maxiter=10, seed=None):
-    """Recherche un theta_initial thermique optimisé via DE (ZAB)."""
+    """Search for an optimized thermal theta_initial via DE (ZAB)."""
     dataset = SimulationDataset.from_csv(
         TRAIN_CSV,
         control_cols=CONTROL_COLS,
@@ -45,7 +45,7 @@ def optimize_theta_initial_zab(popsize=8, maxiter=10, seed=None):
     out_dir.mkdir(parents=True, exist_ok=True)
 
     def save_top10_live(hall):
-        """Sauvegarde en continu le top-10 DE en texte."""
+        """Continuously save the top-10 DE candidates as text."""
         if not hall:
             return
         top = hall[:10]
@@ -61,14 +61,14 @@ def optimize_theta_initial_zab(popsize=8, maxiter=10, seed=None):
                 f.write("\n")
 
     def vec_to_theta(vec):
-        """Vecteur -> dictionnaire theta ZAB (th seulement)."""
+        """Vector -> ZAB theta dictionary (th only)."""
         th = {}
         for i, key in enumerate(th_keys):
             th[key] = jnp.asarray(vec[i], dtype=jnp.float64)
         return {"th": th}
 
-    # best_de : coût utilisé par DE (repondéré)
-    # best_lm : coût LM pur (Value = 0.5 * loss_final)
+    # best_de: cost used by DE (reweighted)
+    # best_lm: pure LM cost (Value = 0.5 * loss_final)
     log_state = {"eval": 0, "best_de": math.inf, "best_lm": math.inf, "hall": [], "archive": {}}
     cb_state = {"nit": 0}
 
@@ -121,13 +121,13 @@ def optimize_theta_initial_zab(popsize=8, maxiter=10, seed=None):
         opt_err = metrics.get("opt_error", math.nan)
         iterations = int(metrics.get("iterations", 1))
 
-        # Coût LM pur (Value du LM) : 0.5 * ||res||^2 si fini, sinon pénalité.
+        # Pure LM cost (LM's Value): 0.5 * ||res||^2 if finite, otherwise a penalty.
         if math.isfinite(raw_cost):
             cost_lm = 0.5 * float(raw_cost)
         else:
             cost_lm = 1e6
 
-        # Détection d'un gradient NaN / optimisation dégénérée
+        # Detect NaN gradient / degenerate optimization
         nan_grad = not math.isfinite(opt_err)
         if nan_grad:
             denom = max(iterations, 1)
@@ -170,7 +170,7 @@ def optimize_theta_initial_zab(popsize=8, maxiter=10, seed=None):
 
         hall = log_state.get("hall") or []
         if hall:
-            print("[DE-ZAB] Top 3 pistes (global) :")
+            print("[DE-ZAB] Top 3 candidates (global):")
             for rank, (c_lm, c_de, eval_hall, _) in enumerate(hall, 1):
                 print(f"   #{rank} eval={eval_hall} value_lm={c_lm:.6g} cost_de={c_de:.6g}")
             print("")
@@ -183,7 +183,7 @@ def optimize_theta_initial_zab(popsize=8, maxiter=10, seed=None):
         return cost_de
 
     def de_callback(xk, convergence):
-        """Callback SciPy, appelé une fois par génération DE."""
+        """SciPy callback, called once per DE generation."""
         cb_state["nit"] += 1
         nit = cb_state["nit"]
         print(
@@ -193,7 +193,7 @@ def optimize_theta_initial_zab(popsize=8, maxiter=10, seed=None):
         )
         return False
 
-    # Bornes physiques issues de BOUNDS_ZAB, alignées sur l'ordre des clés th.
+    # Physical bounds from BOUNDS_ZAB, aligned with the order of th keys.
     bounds = []
     for key in th_keys:
         b = BOUNDS_ZAB["th"][key]
@@ -209,11 +209,11 @@ def optimize_theta_initial_zab(popsize=8, maxiter=10, seed=None):
         polish=False,
         callback=de_callback,
     )
-    print(f"[DE-ZAB] Terminé: nit={getattr(result, 'nit', None)}  nfev={getattr(result, 'nfev', None)}")
+    print(f"[DE-ZAB] Done: nit={getattr(result, 'nit', None)}  nfev={getattr(result, 'nfev', None)}")
 
     hall = log_state.get("hall") or []
     if hall:
-        print("\n[DE-ZAB] Classement final (Top 3) :")
+        print("\n[DE-ZAB] Final ranking (Top 3):")
         for rank, (c_lm, c_de, eval_hall, _) in enumerate(hall, 1):
             print(f"   #{rank} eval={eval_hall} value_lm={c_lm:.6g} cost_de={c_de:.6g}")
 

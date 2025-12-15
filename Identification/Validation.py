@@ -13,7 +13,7 @@ from SIMAX.Simulation import Simulation_JAX, SimulationDataset, Sim_and_Data
 
 @dataclass(frozen=True)
 class ValidationState:
-    """Résultat d'une validation : sorties simulées et métriques calculées."""
+    """Result of a validation: simulated outputs and computed metrics."""
 
     theta: dict[str, Any]
     time: jnp.ndarray
@@ -25,25 +25,25 @@ class ValidationState:
 
 @dataclass(frozen=True)
 class ValidationBase(ABC):
-    """Super-classe minimale pour valider un modèle à partir d'un dataset."""
+    """Minimal base class to validate a model from a dataset."""
 
     simulation: Simulation_JAX
     dataset: SimulationDataset
     state: ValidationState | None = field(default=None, init=False)
 
     def simulation_for_dataset(self, dataset):
-        """dataset (SimulationDataset) -> Simulation_JAX. Construit une copie de la simulation courante adaptée au dataset fourni."""
+        """dataset (SimulationDataset) -> Simulation_JAX. Build a copy of the current simulation adapted to the provided dataset."""
         return self.simulation.copy(time_grid=dataset.time, d=dataset.d)
 
     def run(self, theta=None):
-        """theta (dict[str, Any] | None) -> ValidationState. Lance la simulation et calcule les métriques associées."""
+        """theta (dict[str, Any] | None) -> ValidationState. Run the simulation and compute the associated metrics."""
         sim = self.simulation_for_dataset(self.dataset)
         time, y_sim, *_ = sim.run(theta)
         y_arr = jnp.asarray(y_sim, dtype=jnp.float64)
         if y_arr.ndim == 1:
             y_arr = y_arr[:, None]
         if y_arr.shape[1] < 3:
-            raise ValueError("ValidationBase.run suppose au moins 3 sorties (tz, qc, qe).")
+            raise ValueError("ValidationBase.run assumes at least 3 outputs (tz, qc, qe).")
         tz_sim = y_arr[:, 0]
         qc_sim = y_arr[:, 1]
         qe_sim = y_arr[:, 2]
@@ -64,14 +64,14 @@ class ValidationBase(ABC):
         return self.state
 
     def report(self, state=None):
-        """state (ValidationState | None) -> dict[str, Any]. Retourne les métriques calculées pour inspection rapide."""
+        """state (ValidationState | None) -> dict[str, Any]. Return computed metrics for quick inspection."""
         current = state if state is not None else self.state
         if current is None:
             raise RuntimeError("Validation not run yet; call run() before report().")
         return dict(current.metrics)
 
     def plot(self, state=None, *, theta=None, path=None):
-        """state (ValidationState | None), theta (dict[str, Any] | None), path (str | None) -> None. Trace les séries simulées vs mesures via Sim_and_Data."""
+        """state (ValidationState | None), theta (dict[str, Any] | None), path (str | None) -> None. Plot simulated series vs measurements via Sim_and_Data."""
         current = state if state is not None else self.state
         theta_used = theta
         if theta_used is None:
@@ -79,7 +79,7 @@ class ValidationBase(ABC):
                 raise RuntimeError("Validation not run yet; provide theta or call run().")
             theta_used = current.theta
         sim = self.simulation_for_dataset(self.dataset)
-        # Pour RC5, on empile les trois sorties mesurées en vecteur y_meas
+        # For RC5, stack the three measured outputs into y_meas
         d = self.dataset.d
         y_meas = jnp.stack((d["reaTZon_y"], d["reaQHeaPumCon_y"], d["reaQHeaPumEva_y"]), axis=-1)
         sim_data = Sim_and_Data(simulation=sim, dataset=self.dataset, y_meas=y_meas, W=None, initial_state_fn=None)
@@ -87,15 +87,15 @@ class ValidationBase(ABC):
 
     @abstractmethod
     def compute_metrics(self, tz_sim, qc_sim, qe_sim):
-        """tz_sim (jnp.ndarray), qc_sim (jnp.ndarray), qe_sim (jnp.ndarray) -> dict[str, Any]. Calcule les métriques d'évaluation entre simulation et mesures."""
+        """tz_sim (jnp.ndarray), qc_sim (jnp.ndarray), qe_sim (jnp.ndarray) -> dict[str, Any]. Compute evaluation metrics between simulation and measurements."""
         ...
 
 
 class Validation_RC5(ValidationBase):
-    """Validation élémentaire des sorties Tz/Qc_dot/Qe_dot du modèle RC5."""
+    """Basic validation of RC5 outputs Tz/Qc_dot/Qe_dot."""
 
     def simulation_for_dataset(self, dataset):  # type: ignore[override]
-        """dataset (SimulationDataset) -> Simulation_JAX. Adapter la simulation RC5 au dataset fourni."""
+        """dataset (SimulationDataset) -> Simulation_JAX. Adapt the RC5 simulation to the provided dataset."""
         base = super().simulation_for_dataset(dataset)
         controller = base.controller
         if isinstance(controller, Controller_constSeq):
@@ -103,10 +103,10 @@ class Validation_RC5(ValidationBase):
         return base.copy(controller=controller)
 
     def compute_metrics(self, tz_sim, qc_sim, qe_sim):  # type: ignore[override]
-        """tz_sim (jnp.ndarray), qc_sim (jnp.ndarray), qe_sim (jnp.ndarray) -> dict[str, Any]. Compare les sorties RC5 aux mesures."""
+        """tz_sim (jnp.ndarray), qc_sim (jnp.ndarray), qe_sim (jnp.ndarray) -> dict[str, Any]. Compare RC5 outputs to measurements."""
 
         def stats(err, prefix):
-            """err (jnp.ndarray), prefix (str) -> dict[str, float]. Calcule RMSE/MAE/biais pour un signal."""
+            """err (jnp.ndarray), prefix (str) -> dict[str, float]. Compute RMSE/MAE/bias for a signal."""
             rmse = float(jnp.sqrt(jnp.mean(err**2)))
             mae = float(jnp.mean(jnp.abs(err)))
             bias = float(jnp.mean(err))

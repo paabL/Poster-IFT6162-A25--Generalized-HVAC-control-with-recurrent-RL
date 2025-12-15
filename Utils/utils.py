@@ -15,7 +15,7 @@ import math
 import jax.numpy as jnp
 
 def RC5_steady_state_sys(Ta, Q_solar, Q_con, Q_rad, Qc_dot_val, theta):
-    """Résout le steady-state du modèle RC5 (dérivées nulles)."""
+    """Solve the steady-state of the RC5 model (zero derivatives)."""
     th = theta["th"]
     R_inf, R_w1, R_w2, R_i, R_f, R_c, gA = (
         th[k] for k in ["R_inf", "R_w1", "R_w2", "R_i", "R_f", "R_c", "gA"]
@@ -38,21 +38,21 @@ def RC5_steady_state_sys(Ta, Q_solar, Q_con, Q_rad, Qc_dot_val, theta):
         -Qc_dot_val,
     ], dtype=jnp.float64)
 
-    # Solution libre
+    # Unconstrained solution
     x_free = jnp.linalg.solve(A, b)  # [Tz, Tw, Ti, Tf, Tc]
 
-    # Clip composant par composant dans des plages physiques cohérentes (Kelvin) :
-    # - Zone ≈ confort : [15, 30] °C
-    # - Parois/masses proches de l'air : [5, 35] °C
-    # - Dalle plus inertielle : [15, 30] °C
-    # - Fluide condenseur HP : [15, 50] °C
+    # Clip each component within physically consistent ranges (Kelvin):
+    # - Zone ≈ comfort: [15, 30] °C
+    # - Walls/masses close to air: [5, 35] °C
+    # - Slab (more inertial): [15, 30] °C
+    # - Heat pump condenser fluid: [15, 50] °C
     t_min = 273.15 + jnp.asarray([15.0, 5.0, 15.0, 15.0, 15.0], dtype=jnp.float64)
     t_max = 273.15 + jnp.asarray([30.0, 35.0, 30.0, 40.0, 50.0], dtype=jnp.float64)
     return jnp.clip(x_free, t_min, t_max)
 
 
 def scale_rc5_building(theta: Mapping[str, Any], k: Mapping[str, float]) -> dict[str, Any]:
-    """Scale uniquement les paramètres bâtiment (th), laisse la PAC intacte."""
+    """Scale only building parameters (th) and leave the heat pump (pac) unchanged."""
     th0 = dict(theta.get("th", {}))
     out = dict(theta)
     th = dict(th0)

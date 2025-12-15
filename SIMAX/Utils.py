@@ -5,7 +5,7 @@ import jax.numpy as jnp
 
 
 def build_dt_sequence(time_grid, dt_default):
-    """Construit une suite de pas de temps positifs cohérente avec une grille donnée."""
+    """Build a sequence of positive time steps consistent with a given grid."""
     dt_default = jnp.asarray(dt_default, dtype=time_grid.dtype)
     diffs = jnp.diff(time_grid, prepend=time_grid[:1])
     diffs = diffs.at[0].set(0.0)
@@ -13,7 +13,7 @@ def build_dt_sequence(time_grid, dt_default):
 
 
 def estimate_derivative(time, values, window=5):
-    """Estime une dérivée moyenne sur une courte fenêtre initiale."""
+    """Estimate an average derivative over a short initial window."""
     time_arr = jnp.asarray(time, dtype=jnp.float64)
     values_arr = jnp.asarray(values, dtype=jnp.float64)
     n = int(min(window, values_arr.size))
@@ -28,4 +28,3 @@ def estimate_derivative(time, values, window=5):
 
 
 __all__ = ["build_dt_sequence", "estimate_derivative"]
-

@@ -17,25 +17,25 @@ MODEL_PATHS = [
 VECNORM_PATH = Path("vecnormalize_stats_1FA_LSTM_HU.pkl")
 
 PLOT_PER_KS = True
-KS_INDICES: list[int] | None = None  # ex: [0, 3] ; None = tous
+KS_INDICES: list[int] | None = None  # e.g.: [0, 3]; None = all
 
-EPISODE_START_TIME_S = 28 * 24 * 3600  # 1er février si t=0 = 1er janvier
+EPISODE_START_TIME_S = 28 * 24 * 3600  # Feb 1st if t=0 = Jan 1st
 
 N_EPISODES = 1
 DETERMINISTIC = True
 DEVICE = "cpu"
 MAX_STEPS: int | None = None  # cap steps RL (debug)
 
-# Baseline: agent constant (consigne fixe)
+# Baseline: constant agent (fixed setpoint)
 constant = True
-CONSTANT_VALUE_C = 22.0  # consigne (°C) (base_setpoint du script)
-KEEP_PLOTS_OPEN = False  # sinon les fenêtres peuvent se fermer à la fin du script
-SAVE_PLOTS = False      # utile si backend headless (Agg)
-AUTO_OPEN_SAVED_PLOTS = False  # robuste: ouvre le dossier `plots/`
+CONSTANT_VALUE_C = 22.0  # setpoint (°C) (script base_setpoint)
+KEEP_PLOTS_OPEN = False  # otherwise windows may close at the end of the script
+SAVE_PLOTS = False      # useful if running headless (Agg)
+AUTO_OPEN_SAVED_PLOTS = False  # robust: opens the `plots/` folder
 PLOTS_DIR = Path("plots")
 
-# IMPORTANT: doit matcher le modèle/VecNormalize (sinon obs_space mismatch)
-# Entraînement (`1FA_LSTM.py`) : MyMinimalEnvLSTM avec past_steps=0 (Dict obs: {now, forecast})
+# IMPORTANT: must match the model/VecNormalize (otherwise obs_space mismatch)
+# Training (`1FA_LSTM.py`): MyMinimalEnvLSTM with past_steps=0 (Dict obs: {now, forecast})
 PAST_STEPS = 0
 FUTURE_STEPS = 12
 WARMUP_STEPS = 4 * 24
@@ -54,7 +54,7 @@ KS_PRESETS = [
     #{"k_size": 1.0, "k_U": 1.0, "k_inf": 1.0, "k_win": 1.2, "k_mass": 1.0},
     #{"k_size": 1.0, "k_U": 1.0, "k_inf": 1.0, "k_win": 0.8, "k_mass": 1.0},
     #{"k_size": 1.0, "k_U": 1.0, "k_inf": 1.0, "k_win": 1.0, "k_mass": 1.2},
-    {"k_size": 1.1, "k_U": 0.9, "k_inf": 1.1, "k_win": 0.9, "k_mass": 1.1}, #Pas dans l'entrainement
+    {"k_size": 1.1, "k_U": 0.9, "k_inf": 1.1, "k_win": 0.9, "k_mass": 1.1}, # Not in training
 ]
 
 
@@ -119,7 +119,7 @@ def _load_vecnormalize(venv, vecnorm_path: Path | None):
     if vecnorm_path is None:
         return venv
     if not vecnorm_path.exists():
-        raise FileNotFoundError(f"VecNormalize stats introuvables: {vecnorm_path}")
+        raise FileNotFoundError(f"VecNormalize stats not found: {vecnorm_path}")
     from stable_baselines3.common.vec_env import VecNormalize
 
     venv = VecNormalize.load(str(vecnorm_path), venv)
@@ -214,7 +214,7 @@ def _plot_last_episode(venv) -> None:
         cur = cur.venv
     base = _unwrap_to(cur.envs[0], MyMinimalEnv)
     if base is None:
-        raise RuntimeError("Impossible de retrouver MyMinimalEnv (wrappers inattendus).")
+        raise RuntimeError("Unable to find MyMinimalEnv (unexpected wrappers).")
     base.rollout_dir = PLOTS_DIR
     base._plot_episode()
 
@@ -229,7 +229,7 @@ def _open_path(path: Path) -> None:
 if __name__ == "__main__":
     model_paths = [p for p in MODEL_PATHS if p.exists()]
     if not model_paths:
-        raise SystemExit("Aucun modèle trouvé (edite `MODEL_PATHS`).")
+        raise SystemExit("No model found (edit `MODEL_PATHS`).")
 
     ks_indices = KS_INDICES if KS_INDICES is not None else list(range(len(KS_PRESETS)))
     if not PLOT_PER_KS:
@@ -251,7 +251,7 @@ if __name__ == "__main__":
             venv_norm = _load_vecnormalize(venv_norm, VECNORM_PATH)
             model = _load_model(model_path, venv=venv_norm, device=DEVICE)
 
-            env = venv_norm.venv.envs[0]  # même wrappers, mais sans auto-reset VecEnv
+            env = venv_norm.venv.envs[0]  # same wrappers, but without VecEnv auto-reset
 
             if ks_idx is not None:
                 print(f"KS[{ks_idx}]={KS_PRESETS[int(ks_idx)]}")
@@ -271,7 +271,7 @@ if __name__ == "__main__":
                 print(f"[rl] ep={ep+1}/{N_EPISODES} return={r:.3f} len={int(l)}")
                 base = _unwrap_to(env, MyMinimalEnv)
                 if base is None:
-                    raise RuntimeError("Impossible de retrouver MyMinimalEnv (wrappers inattendus).")
+                    raise RuntimeError("Unable to find MyMinimalEnv (unexpected wrappers).")
                 base.rollout_dir = PLOTS_DIR
                 base._plot_episode()
                 if SAVE_PLOTS:
@@ -296,7 +296,7 @@ if __name__ == "__main__":
                     print(f"[const={CONSTANT_VALUE_C:g}C] ep={ep+1}/{N_EPISODES} return={r_c:.3f} len={int(l_c)}")
                     base = _unwrap_to(env, MyMinimalEnv)
                     if base is None:
-                        raise RuntimeError("Impossible de retrouver MyMinimalEnv (wrappers inattendus).")
+                        raise RuntimeError("Unable to find MyMinimalEnv (unexpected wrappers).")
                     base.rollout_dir = PLOTS_DIR
                     base._plot_episode()
 

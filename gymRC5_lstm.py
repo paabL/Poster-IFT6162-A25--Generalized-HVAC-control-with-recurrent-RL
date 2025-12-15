@@ -2,88 +2,88 @@
 import numpy as np
 from gymnasium import spaces
 
-from gymRC5 import MyMinimalEnv  # <- ton env existant (inchangé)
+from gymRC5 import MyMinimalEnv  # <- your existing env (unchanged)
 
 
 class MyMinimalEnvLSTM(MyMinimalEnv):
     """
     ============================================================
-    BUT
+    GOAL
     ============================================================
 
-    Adapter MyMinimalEnv pour RecurrentPPO (LSTM) de manière minimale.
+    Adapt MyMinimalEnv to RecurrentPPO (LSTM) in a minimal way.
 
-    MyMinimalEnv renvoie une observation "plate" (un gros vecteur),
-    qui contenait souvent du passé/futur explicitement.
+    MyMinimalEnv returns a "flat" observation (a large vector),
+    which often explicitly contained past/future information.
 
-    Avec un LSTM, on peut simplifier :
-      - pas besoin d'empiler un historique passé dans l'observation
-        (past_steps=0 suffit souvent) car le LSTM mémorise dans son état interne.
-      - on peut *garder* un forecast (H pas futurs) si on veut aider
-        l'agent à anticiper (météo, consignes futures, etc.)
+    With an LSTM, we can simplify:
+      - no need to stack a past history in the observation
+        (past_steps=0 is often enough) because the LSTM keeps memory in its hidden state.
+      - we can *keep* a forecast (H future steps) if we want to help
+        the agent anticipate (weather, future setpoints, etc.)
 
     ============================================================
     OBSERVATION (Dict)
     ============================================================
 
-    On renvoie un Dict avec deux parties :
+    We return a Dict with two parts:
 
-      1) now      : vecteur (features au temps t) + (Tz actuel, setpoint actuel)
-      2) forecast : matrice (H, feat) contenant des informations futures "connues"
+      1) now      : vector (features at time t) + (current Tz, current setpoint)
+      2) forecast : matrix (H, feat) containing "known" future information
 
-    IMPORTANT (ta contrainte) :
-      - On NE MET PAS occupancy ni electricity_price dans la forecast
-        (tu veux que le modèle les "prédise"/inférer à partir du temps, météo, etc.)
-      - En revanche on inclut les features de temps dans la forecast :
-        week_idx, dow_sin/cos, hour_sin/cos, ... (déterministes)
+    IMPORTANT (your constraint):
+      - We DO NOT include occupancy or electricity_price in the forecast
+        (you want the model to "predict"/infer them from time, weather, etc.)
+      - We do include time features in the forecast:
+        week_idx, dow_sin/cos, hour_sin/cos, ... (deterministic)
 
     ============================================================
-    NOTE SUR LES FEATURES "connues"
+    NOTE ON "KNOWN" FEATURES
     ============================================================
 
-    Dans ton dataset tu as :
-      - météo (Ta, Qsol)
-      - gains internes (Qocc/Qocr)  -> attention : ça peut implicitement contenir l'occupation
-      - bandes de confort (Lower/Upper)
+    In your dataset you have:
+      - weather (Ta, Qsol)
+      - internal gains (Qocc/Qocr)  -> note: this can implicitly contain occupancy
+      - comfort bands (Lower/Upper)
       - occupancy, electricity_price
-      - temps cyclique
+      - cyclic time features
 
-    Ici on respecte STRICTEMENT ta demande :
-      - forecast : exclut occupancy + price
-      - now : contient la mesure actuelle (incluant occupancy + price au temps t), car "présent connu".
+    Here we STRICTLY follow your request:
+      - forecast: excludes occupancy + price
+      - now: contains the current measurement (including occupancy + price at time t), because the "present is known".
     """
 
     def __init__(self, *args, past_steps: int = 0, future_steps: int = 24, **kwargs):
-        # On laisse MyMinimalEnv gérer tout ce qui est simulation, reward, warmup, etc.
+        # Let MyMinimalEnv handle everything related to simulation, reward, warmup, etc.
         super().__init__(*args, past_steps=past_steps, future_steps=future_steps, **kwargs)
 
         # ------------------------------------------------------------
-        # now = "full features" au temps t + (Tz, setpoint)
+        # now = "full features" at time t + (Tz, setpoint)
         # ------------------------------------------------------------
-        # self._aggregate_step_features(idx) renvoie la moyenne sur 1 pas RL :
+        # self._aggregate_step_features(idx) returns the mean over 1 RL step:
         # full = [Ta, qsol, qocc, qocr, qcd/php, lower, upper, occ, price, time...]
         #
-        # Sa taille = self.n_features_past
+        # Its size = self.n_features_past
         self.now_dim = int(self.n_features_past + 2)  # + (tz, sp)
 
         # ------------------------------------------------------------
-        # forecast (H, feat) : ce qu'on donne au réseau pour anticiper.
+        # forecast (H, feat): what we provide to the network to anticipate.
         # ------------------------------------------------------------
-        # On veut du futur "connu" :
-        #   - météo, consignes, (éventuellement gains internes si tu les considères connus)
-        #   - temps (week_idx, hour_sin/cos, dow_sin/cos, ...)
-        # On exclut explicitement :
+        # We want "known" future information:
+        #   - weather, setpoints, (optionally internal gains if you consider them known)
+        #   - time (week_idx, hour_sin/cos, dow_sin/cos, ...)
+        # We explicitly exclude:
         #   - occupancy
         #   - electricity_price
         #
-        # Choix simple (phys_future) :
-        #   Ta, qsol, qocc, qocr  (4)   <- si tu veux éviter de leak l'occupation, enlève qocc/qocr aussi
+        # Simple choice (phys_future):
+        #   Ta, qsol, qocc, qocr  (4)   <- if you want to avoid leaking occupancy, remove qocc/qocr too
         #   lower, upper          (2)
         #   + time_feats          (n_time_features)
         self.forecast_phys_dim = 4 + 2
         self.forecast_feat_dim = int(self.forecast_phys_dim + self.n_time_features)
 
-        # Définition de l'observation_space Dict pour MultiInputLstmPolicy
+        # Define the Dict observation_space for MultiInputLstmPolicy
         self.observation_space = spaces.Dict(
             {
                 "now": spaces.Box(
@@ -103,29 +103,29 @@ class MyMinimalEnvLSTM(MyMinimalEnv):
 
     def _build_observation(self):
         """
-        Construit l'observation Dict.
+        Build the Dict observation.
 
         now:
-          - features agrégées à t
-          - + tz_hist[-1] (température zone moyenne sur le dernier pas RL)
-          - + sp_hist[-1] (setpoint appliqué au dernier pas RL)
+          - aggregated features at t
+          - + tz_hist[-1] (zone temperature averaged over the last RL step)
+          - + sp_hist[-1] (setpoint applied over the last RL step)
 
         forecast:
-          - H lignes (t+1 ... t+H)
-          - chaque ligne : [Ta, qsol, qocc, qocr, lower, upper, time_feats...]
-          - PAS d'occupancy/price dans forecast.
+          - H rows (t+1 ... t+H)
+          - each row: [Ta, qsol, qocc, qocr, lower, upper, time_feats...]
+          - NO occupancy/price in forecast.
         """
         # ------------------------------------------------------------
         # now
         # ------------------------------------------------------------
         full = self._aggregate_step_features(self.idx).astype(np.float32)
-        tz = np.float32(self.tz_hist[-1])  # température zone "résumée" au pas RL
-        sp = np.float32(self.sp_hist[-1])  # consigne appliquée au pas RL
+        tz = np.float32(self.tz_hist[-1])  # zone temperature "summarized" at the RL step
+        sp = np.float32(self.sp_hist[-1])  # setpoint applied at the RL step
         now = np.concatenate([full, np.array([tz, sp], dtype=np.float32)], axis=0)
 
         # Safety check shape
         if now.shape != (self.now_dim,):
-            raise ValueError(f"now shape invalide: {now.shape}, attendu {(self.now_dim,)}")
+            raise ValueError(f"Invalid now shape: {now.shape}, expected {(self.now_dim,)}")
 
         # ------------------------------------------------------------
         # forecast
@@ -134,14 +134,14 @@ class MyMinimalEnvLSTM(MyMinimalEnv):
         forecast = np.zeros((H, self.forecast_feat_dim), dtype=np.float32)
 
         for k in range(1, H + 1):
-            # start_k est exprimé en index dataset (pas RL = step_n points)
+            # start_k is expressed in dataset indices (RL step = step_n points)
             start_k = self.idx + k * self.step_n
             fk = self._aggregate_step_features(start_k)  # (n_features_past,)
 
-            # fk indices (chez toi) :
+            # fk indices (in your setup):
             # 0 Ta, 1 qsol, 2 qocc, 3 qocr, 4 qcd/php, 5 lower, 6 upper, 7 occ, 8 price, 9.. time feats
 
-            # phys futurs "connus" (selon ton choix)
+            # "known" future physical features (depending on your choice)
             phys = np.concatenate(
                 [
                     fk[0:4],   # Ta, qsol, qocc, qocr
@@ -150,16 +150,16 @@ class MyMinimalEnvLSTM(MyMinimalEnv):
                 axis=0,
             )
 
-            # time feats = tout ce qui vient après les 9 features physiques "past"
+            # time feats = everything after the 9 physical "past" features
             # (week_idx, dow_sin, dow_cos, hour_sin, hour_cos, ...)
             time_feats = fk[self.n_phys_features_past:]
 
-            # On concatène => (forecast_feat_dim,)
+            # Concatenate => (forecast_feat_dim,)
             fvec = np.concatenate([phys, time_feats], axis=0).astype(np.float32)
 
             if fvec.shape != (self.forecast_feat_dim,):
                 raise ValueError(
-                    f"forecast row shape invalide: {fvec.shape}, attendu {(self.forecast_feat_dim,)}"
+                    f"Invalid forecast row shape: {fvec.shape}, expected {(self.forecast_feat_dim,)}"
                 )
 
             forecast[k - 1] = fvec

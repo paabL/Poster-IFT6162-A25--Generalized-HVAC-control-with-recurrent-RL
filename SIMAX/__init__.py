@@ -1,17 +1,16 @@
 from __future__ import annotations
 
-"""SIMAX : noyau générique de simulation JAX.
+"""SIMAX: generic JAX simulation core.
 
-Les modules concrets sont organisés par rôle :
-- `SIMAX.Models`      : conteneur de modèle JAX générique ;
-- `SIMAX.Simulation`  : moteur de simulation et outils d'identification ;
-- `SIMAX.Controller`  : contrôleurs génériques compatibles JAX ;
-- `SIMAX.Params`      : utilitaires de paramètres JAX.
+Concrete modules are organized by role:
+- `SIMAX.Models`      : generic JAX model container;
+- `SIMAX.Simulation`  : simulation engine and identification tools;
+- `SIMAX.Controller`  : generic JAX-compatible controllers;
+- `SIMAX.Params`      : JAX parameter utilities.
 
-Le code spécifique (RC5, BOPTEST, scripts d'application) reste à la racine.
+Project-specific code (RC5, BOPTEST, application scripts) stays at the repo root.
 """
 
 import jax64  # noqa: F401
 
 __all__: list[str] = []
-

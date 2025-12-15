@@ -5,8 +5,8 @@ from typing import Any
 import numpy as np
 
 
-# Poids "en euros" utilisés dans gymRC5 (reward = -cost).
-DEFAULT_W_ENERGY_EUR = 1.0              # €/€  (coût énergie déjà en euros)
+# "Euro" weights used in gymRC5 (reward = -cost).
+DEFAULT_W_ENERGY_EUR = 1.0              # €/€  (energy cost already in euros)
 DEFAULT_W_COMFORT_EUR_PER_KH = 5.0      # €/K·h
 DEFAULT_W_SAT_EUR_PER_UNIT_H = 0.2      # €/(|delta_sat|·h)
 
@@ -26,22 +26,22 @@ def interval_components(  # noqa: PLR0913
     xp=np,
 ):
     """
-    Calcule les composantes de coût sur des intervalles (alignement "gymRC5").
+    Compute cost components over intervals ("gymRC5" alignment).
 
-    Conventions (compatibles gymRC5.py et MPC_RC5-RC5.py) :
-    - t_step_s : temps des points d'intégration (en secondes), taille N
-    - tz_seq_k : Tz "sur les intervalles" (souvent tz[1:]), taille N
-    - lower/upper/occ/price/php : grandeurs au même alignement, taille N
+    Conventions (compatible with gymRC5.py and MPC_RC5-RC5.py):
+    - t_step_s : integration point times (in seconds), shape N
+    - tz_seq_k : Tz "on intervals" (often tz[1:]), shape N
+    - lower/upper/occ/price/php : aligned signals, shape N
 
-    Retour :
+    Returns:
     - energy_eur : ∫ price(€/kWh) * max(php,0)(kW) dt(h)  [€]
     - comfort_kh : ∫ (violation(K) * occ) dt(h)          [K·h]
-      Option : adoucir la violation près de 0 avec un Huber (comfort_huber_k > 0)
-        v_eff = 0.5*v^2/delta  si v <= delta
-                v - 0.5*delta  sinon
-    - u_unit_h   : ∫ |u| dt(h)                           [unit·h] (0 si u_seq=None)
+      Option: soften the violation near 0 with a Huber (comfort_huber_k > 0)
+        v_eff = 0.5*v^2/delta  if v <= delta
+                v - 0.5*delta  else
+    - u_unit_h   : ∫ |u| dt(h)                           [unit·h] (0 if u_seq=None)
     - tz_kh      : ∫ Tz(K) dt(h)                         [K·h]
-    - sat_unit_h : ∫ |delta_sat| dt(h)                   [unit·h] (0 si delta_sat_seq=None)
+    - sat_unit_h : ∫ |delta_sat| dt(h)                   [unit·h] (0 if delta_sat_seq=None)
     """
     t_step_s = xp.asarray(t_step_s, dtype=xp.float64)
     if t_step_s.size < 2:
@@ -57,7 +57,7 @@ def interval_components(  # noqa: PLR0913
 
     comfort_dev = xp.maximum(lower_seq_k - tz_seq_k, 0.0) + xp.maximum(tz_seq_k - upper_seq_k, 0.0)
     if float(comfort_huber_k) > 0.0:
-        # v_eff a la même unité que v (Kelvin), mais est plus doux près de 0.
+        # v_eff has the same unit as v (Kelvin), but is smoother near 0.
         delta = xp.asarray(comfort_huber_k, dtype=xp.float64)
         comfort_dev = xp.where(
             comfort_dev <= delta,
@@ -106,9 +106,9 @@ def interval_reward_and_terms(  # noqa: PLR0913
     xp=np,
 ):
     """
-    Reward "gymRC5-compatible" en euros : reward = -(wE*energy + wC*comfort + wS*sat + wU*∫|u| + wTz*∫Tz).
+    GymRC5-compatible reward in euros: reward = -(wE*energy + wC*comfort + wS*sat + wU*∫|u| + wTz*∫Tz).
 
-    Retourne (reward, (comfort_term, energy_term, sat_term)) où chaque terme est négatif.
+    Returns (reward, (comfort_term, energy_term, sat_term)) where each term is negative.
     """
     energy_eur, comfort_kh, u_unit_h, tz_kh, sat_unit_h = interval_components(
         t_step_s=t_step_s,

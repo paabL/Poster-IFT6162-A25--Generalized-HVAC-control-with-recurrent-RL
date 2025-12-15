@@ -9,7 +9,7 @@ from SIMAX.Utils import build_dt_sequence
 
 
 # ----------------------
-# Paramètres RC5 (spécifiques au modèle thermique)
+# RC5 parameters (specific to the thermal model)
 # ----------------------
 
 PARAM_ORDER = [
@@ -75,22 +75,22 @@ _DEFAULT_X0 = jnp.full((5,), 293.15, dtype=jnp.float64)
 
 
 def copy_theta(template):
-    """Convertit un dictionnaire de paramètres en tenseurs float64."""
+    """Convert a parameter dictionary to float64 tensors."""
     return {s: {k: jnp.asarray(v, dtype=jnp.float64) for k, v in p.items()} for s, p in template.items()}
 
 
 def default_theta():
-    """Retourne une copie float64 des paramètres RC par défaut."""
+    """Return a float64 copy of the default RC parameters."""
     return copy_theta(_DEFAULT_THETA)
 
 
 def default_x0():
-    """Fournit l'état initial par défaut au format JAX."""
+    """Provide the default initial state in JAX format."""
     return jnp.array(_DEFAULT_X0, dtype=jnp.float64)
 
 
 def theta_from_vec(vec, template=None):
-    """Reconstruit le dictionnaire `theta` à partir d'un vecteur plat."""
+    """Rebuild the `theta` dictionary from a flat vector."""
     vec = jnp.asarray(vec, dtype=jnp.float64)
     if vec.shape != (len(PARAM_ORDER),):
         raise ValueError("Vector length does not match theta dimensionality.")
@@ -102,7 +102,7 @@ def theta_from_vec(vec, template=None):
 
 
 def pack_params(theta, x0=None):
-    """Empile `theta` (et optionnellement `x0`) en un unique vecteur."""
+    """Pack `theta` (and optionally `x0`) into a single vector."""
     params = jnp.asarray([theta[s][k] for s, k in PARAM_ORDER], dtype=jnp.float64)
     if x0 is None:
         return params
@@ -111,7 +111,7 @@ def pack_params(theta, x0=None):
 
 
 def unpack_params(vec, theta_template=None, x0_template=None):
-    """Désempile un vecteur en dictionnaire `theta` et état initial."""
+    """Unpack a vector into a `theta` dictionary and an initial state."""
     vec = jnp.asarray(vec, dtype=jnp.float64)
     theta_template = theta_template or _DEFAULT_THETA
     x0_template = (
@@ -133,83 +133,83 @@ def unpack_params(vec, theta_template=None, x0_template=None):
 
 def initial_stateRC5_steady(tz, ta, qc, theta):
     """
-    Calcule un état initial RC5 à l'équilibre stationnaire (toutes dérivées nulles).
-    Utilisé pour l'initialisation BOPTEST en mode online.
+    Compute an RC5 initial state at steady-state equilibrium (all derivatives are zero).
+    Used for BOPTEST initialization in online mode.
     
-    Paramètres
+    Parameters
     ----------
     tz : float
-        Température de zone mesurée [K]
+        Measured zone temperature [K]
     ta : float
-        Température extérieure mesurée [K]
+        Measured outdoor temperature [K]
     qc : float
-        Puissance condenseur PAC mesurée [W] (via reaQHeaPumCon_y)
+        Measured heat pump condenser power [W] (via reaQHeaPumCon_y)
     theta : dict
-        Paramètres du modèle RC5
+        RC5 model parameters
     
-    Retour
+    Returns
     ------
     jnp.ndarray
-        État [Tz, Tw, Ti, Tf, Tc] à l'équilibre [K]
+        Steady-state state [Tz, Tw, Ti, Tf, Tc] [K]
     
-    Physique du modèle RC5
-    ----------------------
-    À l'équilibre stationnaire (ḋot T_i = 0 pour tous les états) :
+    RC5 model physics
+    -----------------
+    At steady-state equilibrium (ḋot T_i = 0 for all states):
     
-    Équation de T_f (plancher chauffant) :
+    Equation for T_f (heated floor):
         C_f·ḋot T_f = (T_z - T_f)/R_f + (T_c - T_f)/R_c = 0
         => (T_f - T_z)/R_f = (T_c - T_f)/R_c = Q̇_floor
     
-    Équation de T_c (circuit PAC) :
+    Equation for T_c (heat pump loop):
         C_c·ḋot T_c = (T_f - T_c)/R_c + Q̇_c = 0
         => Q̇_c = (T_c - T_f)/R_c
     
-    Donc : Q̇_c mesurée = Q̇_floor = (T_c - T_f)/R_c = (T_f - T_z)/R_f
+    Therefore: measured Q̇_c = Q̇_floor = (T_c - T_f)/R_c = (T_f - T_z)/R_f
     
-    D'où les formules directes :
+    Hence the direct formulas:
         T_f = T_z + Q̇_c · R_f
         T_c = T_f + Q̇_c · R_c
     """
     th = theta["th"]
     
-    # 1. Ti à l'équilibre avec Tz (noeud interne capacitif)
+    # 1. Ti at equilibrium with Tz (internal capacitive node)
     ti = tz
 
-    # 2. Tw à l'équilibre avec Ta et Tz (pont thermique mur)
-    # Équation : C_w·ḋot T_w = (T_a - T_w)/R_w1 + (T_z - T_w)/R_w2 = 0
+    # 2. Tw at equilibrium with Ta and Tz (wall thermal bridge)
+    # Equation: C_w·ḋot T_w = (T_a - T_w)/R_w1 + (T_z - T_w)/R_w2 = 0
     # => T_w = (T_a·R_w2 + T_z·R_w1) / (R_w1 + R_w2)
     denom_rw = th["R_w1"] + th["R_w2"]
     tw = (ta * th["R_w2"] + tz * th["R_w1"]) / denom_rw
 
-    # 3. Tf et Tc à partir de Qc mesurée
-    # Qc (condenseur PAC) = puissance injectée dans le circuit plancher chauffant
+    # 3. Tf and Tc from measured Qc
+    # Qc (heat pump condenser) = power injected into the heated floor loop
     # Flux : Tc -> (R_c) -> Tf -> (R_f) -> Tz
-    tf = tz + qc * th["R_f"]  # De l'équation : (T_f - T_z)/R_f = Q̇_c
-    tc = tf + qc * th["R_c"]  # De l'équation : (T_c - T_f)/R_c = Q̇_c
+    tf = tz + qc * th["R_f"]  # From: (T_f - T_z)/R_f = Q̇_c
+    tc = tf + qc * th["R_c"]  # From: (T_c - T_f)/R_c = Q̇_c
 
     return jnp.array([tz, tw, ti, tf, tc], dtype=jnp.float64)
 
 
 def initial_stateRC5(sim_data, theta):
     """
-    Initialisation classique RC5 à partir de données historiques.
-    Utilise la dérivée temporelle de Tz et un bilan thermique complet.
+    Classic RC5 initialization from historical data.
+    Uses the time derivative of Tz and a complete heat balance.
     
-    Cette méthode nécessite un historique temporel suffisant (≥2 points)
-    et estime les états cachés (Tw, Ti, Tf, Tc) via inversion du modèle
-    et résolution polynomiale pour Tc.
+    This method requires sufficient temporal history (≥2 points)
+    and estimates hidden states (Tw, Ti, Tf, Tc) via model inversion
+    and a polynomial solve for Tc.
     
-    Paramètres
+    Parameters
     ----------
     sim_data : Sim_and_Data
-        Données de simulation avec historique temporel
+        Simulation data with temporal history
     theta : dict
-        Paramètres du modèle RC5
+        RC5 model parameters
     
-    Retour
+    Returns
     ------
     jnp.ndarray
-        État initial [Tz, Tw, Ti, Tf, Tc] [K]
+        Initial state [Tz, Tw, Ti, Tf, Tc] [K]
     """
     sim = sim_data.simulation
     data = sim_data.dataset
@@ -224,10 +224,10 @@ def initial_stateRC5(sim_data, theta):
 
     time = jnp.asarray(data.time, dtype=jnp.float64)
     
-    # Tentative d'initialisation dynamique (si historique suffisant)
+    # Attempt dynamic initialization (if sufficient history)
     try:
         if len(time) < 2:
-            raise ValueError("Pas assez de données pour estimer la dérivée.")
+            raise ValueError("Not enough data to estimate the derivative.")
             
         from SIMAX.Simulation import Sim_and_Data as _SimData
         d_tz0 = _SimData.estimate_derivative(time, tz_series)
@@ -245,13 +245,13 @@ def initial_stateRC5(sim_data, theta):
         tw0 = (th["R_w2"] * ta0 + th["R_w1"] * tz0) / denom_rw
         ti0 = tz0
         
-        # Méthode classique : estimation de Tf via bilan thermique de la zone
-        # À partir de l'équation : C_z·ḋot T_z = ... + (T_f - T_z)/R_f + ...
-        # On isole : (T_f - T_z)/R_f = C_z·ḋot T_z - [autres flux]
+        # Classic method: estimate Tf via the zone heat balance
+        # From: C_z·ḋot T_z = ... + (T_f - T_z)/R_f + ...
+        # Isolate: (T_f - T_z)/R_f = C_z·ḋot T_z - [other fluxes]
         heat_balance = th["C_z"] * d_tz0 - (ta0 - tz0) / th["R_inf"] - (ta0 - tz0) / denom_rw - th["gA"] * qrad0 - qocc0
         tf0 = tz0 + th["R_f"] * heat_balance
 
-        # Estimation de Tc via inversion du modèle PAC
+        # Estimate Tc via inversion of the heat pump model
         k_c = pac["k_c"]
         scale = k_c * u_hp0
         cond = jnp.abs(scale) > 1e-8
@@ -269,21 +269,21 @@ def initial_stateRC5(sim_data, theta):
         
         x0 = jnp.array([tz0, tw0, ti0, tf0, tc0], dtype=jnp.float64)
         
-        # Vérification de cohérence (températures aberrantes)
+        # Coherence check (abnormal temperatures)
         if jnp.any(x0 > 373.15) or jnp.any(x0 < 223.15) or not jnp.all(jnp.isfinite(x0)):
-             raise ValueError("État initial dynamique aberrant.")
+             raise ValueError("Dynamic initial state is abnormal.")
              
         return x0
 
     except Exception:
-        # Fallback : Initialisation stationnaire basée sur Qc mesuré
+        # Fallback: steady-state initialization based on measured Qc
         return initial_stateRC5_steady(tz0, ta0, qc0, theta)
 
 
 import jax.numpy as jnp
 
 def RC5_steady_state_sys(Ta, Q_solar, Q_con, Q_rad, Qc_dot_val, theta):
-    """Résout le steady-state du modèle RC5 (dérivées nulles)."""
+    """Solve the steady-state of the RC5 model (zero derivatives)."""
     th = theta["th"]
     R_inf, R_w1, R_w2, R_i, R_f, R_c, gA = (
         th[k] for k in ["R_inf", "R_w1", "R_w2", "R_i", "R_f", "R_c", "gA"]

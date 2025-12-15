@@ -28,21 +28,21 @@ _SECONDS_PER_DAY = 86400.0
 
 @dataclass(frozen=True)
 class SimulationDataset:
-    """Dataset générique pour simulation/identification.
+    """Generic dataset for simulation/identification.
 
-    Ce conteneur stocke :
-    - une grille de temps,
-    - des séquences de commandes `u`,
-    - des séquences de perturbations `d` (y compris, si désiré, des mesures).
+    This container stores:
+    - a time grid,
+    - sequences of controls `u`,
+    - sequences of disturbances `d` (including, if desired, measurements).
 
-    Attributs
+    Attributes
     ---------
     time : jnp.ndarray
-        Vecteur temps (N,) en secondes.
+        Time vector (N,) in seconds.
     u : dict[str, jnp.ndarray]
-        Commandes de contrôle indexées par nom (N,).
+        Control inputs keyed by name (N,).
     d : dict[str, jnp.ndarray]
-        Perturbations et signaux mesurés indexées par nom (N,).
+        Disturbances and measured signals keyed by name (N,).
     """
 
     time: jnp.ndarray
@@ -51,7 +51,7 @@ class SimulationDataset:
 
     @classmethod
     def from_csv(cls, path, *, control_cols, disturbance_cols):
-        """Charge un dataset générique depuis un fichier CSV."""
+        """Load a generic dataset from a CSV file."""
         frame = pd.read_csv(path)
         frame.columns = frame.columns.str.strip()
 
@@ -64,10 +64,10 @@ class SimulationDataset:
         return cls(time=as_array("time"), u=u, d=d)
 
     def take_fraction(self, gamma):
-        """Sélectionne une fraction de tête du dataset."""
+        """Select a leading fraction of the dataset."""
         frac = float(gamma)
         if not 0.0 < frac <= 1.0:
-            raise ValueError("gamma doit être dans ]0, 1].")
+            raise ValueError("gamma must be in (0, 1].")
         total = int(self.time.shape[0])
         keep = max(1, int(total * frac))
         window = slice(0, keep)
@@ -78,7 +78,7 @@ class SimulationDataset:
 
 @eqx.filter_jit
 def _run_core(model, x0_arr, t_grid, ctrl, d_payloads, base_time_grid, integrator, use_subgrid: bool):
-    """Cœur jitté de la simulation (numérique pur)."""
+    """Jitted core of the simulation (pure numerical code)."""
     dtype = x0_arr.dtype
 
     dt0 = t_grid[1] - t_grid[0]
@@ -149,7 +149,7 @@ def _run_core(model, x0_arr, t_grid, ctrl, d_payloads, base_time_grid, integrato
 
 
 class Simulation_JAX(eqx.Module):
-    """Moteur de simulation JAX pour systèmes dynamiques."""
+    """JAX simulation engine for dynamic systems."""
 
     time_grid: jnp.ndarray
     d: dict[str, jnp.ndarray]
@@ -159,14 +159,14 @@ class Simulation_JAX(eqx.Module):
     integrator: Any | None = eqx.field(static=True, default=None)
 
     def __post_init__(self):
-        """Configure l’intégrateur numérique après création."""
+        """Configure the numerical integrator after creation."""
         self.configure_integrator()
 
     def configure_integrator(self):
-        """Sélectionne le schéma d’intégration à partir de `integrator`."""
+        """Select the integration scheme from `integrator`."""
         integ = self.integrator
         if integ is None or isinstance(integ, str):
-            # Par défaut, on utilise désormais RK2 (Heun) pour un compromis précision/coût
+            # By default, use RK2 (Heun) as a precision/cost compromise
             name = (integ or "rk2").lower()
             table = {
                 "rk4": self.rk4_step,
@@ -176,13 +176,13 @@ class Simulation_JAX(eqx.Module):
             object.__setattr__(self, "integrator", table.get(name, self.rk2_step))
 
     def copy(self, **overrides):
-        """Crée une copie immuable avec quelques champs remplacés."""
+        """Create an immutable copy with some fields overridden."""
         new = replace(self, **overrides)
         new.configure_integrator()
         return new
 
     def save_simulation(self, path):
-        """Sauvegarde la simulation sur disque (pickle)."""
+        """Save the simulation to disk (pickle)."""
         dest = Path(path)
         dest.parent.mkdir(parents=True, exist_ok=True)
         with dest.open("wb") as out:
@@ -192,61 +192,61 @@ class Simulation_JAX(eqx.Module):
     # ---------- Interface publique JAX ----------
 
     def run(self, theta=None, *, x0=None, time_grid=None, controller=None):
-        """Exécute la simulation sur une grille de temps (interface Python)."""
+        """Run the simulation on a time grid (Python interface)."""
 
-        # Modèle (theta figé ou mis à jour)
+        # Model (frozen theta or updated)
         if theta is None:
             model = self.model
         else:
             model = eqx.tree_at(lambda m: m.theta, self.model, theta)
 
-        # État initial
+        # Initial state
         if x0 is None:
             if self.x0 is None:
-                raise ValueError("Aucun état initial fourni (x0=None et self.x0=None).")
+                raise ValueError("No initial state provided (x0=None and self.x0=None).")
             x0_arr = jnp.asarray(self.x0, dtype=jnp.float64)
         else:
             x0_arr = jnp.asarray(x0, dtype=jnp.float64)
 
-        # Grille de temps
+        # Time grid
         t_grid = time_grid if time_grid is not None else self.time_grid
         if t_grid.size < 2:
-            raise ValueError("La grille temporelle doit contenir au moins deux points.")
+            raise ValueError("The time grid must contain at least two points.")
 
-        # Savoir si on utilise un sous-ensemble de la grille
+        # Whether we're using a subgrid
         use_subgrid = time_grid is not None and (t_grid.size != self.time_grid.size)
 
-        # Contrôleur
+        # Controller
         ctrl = controller or self.controller
 
-        # Appel du cœur jitté
+        # Call the jitted core
         return _run_core(model, x0_arr, t_grid, ctrl, self.d, self.time_grid, self.integrator, use_subgrid)
 
-    # ---------- Version NumPy (débogage / traçage) ----------
+    # ---------- NumPy version (debug / tracing) ----------
 
     def run_numpy(self, theta=None, *, x0=None, time_grid=None, controller=None):
-        """Version NumPy de `run` : boucle Python + intégrateur JAX."""
-        # Modèle
+        """NumPy version of `run`: Python loop + JAX integrator."""
+        # Model
         if theta is None:
             model = self.model
         else:
             model = eqx.tree_at(lambda m: m.theta, self.model, theta)
 
-        # État initial
+        # Initial state
         if x0 is None:
             if self.x0 is None:
-                raise ValueError("Aucun état initial fourni (x0=None et self.x0=None).")
+                raise ValueError("No initial state provided (x0=None and self.x0=None).")
             x = np.asarray(self.x0, dtype=np.float64)
         else:
             x = np.asarray(x0, dtype=np.float64)
 
-        # Grille de temps
+        # Time grid
         t_grid = np.asarray(
             time_grid if time_grid is not None else self.time_grid,
             dtype=np.float64,
         )
         if t_grid.size < 2:
-            raise ValueError("La grille temporelle doit contenir au moins deux points.")
+            raise ValueError("The time grid must contain at least two points.")
         dt0 = t_grid[1] - t_grid[0]
 
         ctrl = controller or self.controller
@@ -262,7 +262,7 @@ class Simulation_JAX(eqx.Module):
             idx0 = np.where(base == sub[0])[0]
             if idx0.size == 0:
                 raise ValueError(
-                    "time_grid ne correspond pas à un sous-ensemble de la grille temporelle de la simulation."
+                    "time_grid does not match a subset of the simulation time grid."
                 )
             offset = int(idx0[0])
         else:
@@ -272,7 +272,7 @@ class Simulation_JAX(eqx.Module):
         for key, full in self.d.items():
             arr = np.asarray(full, dtype=np.float64)
             if offset + n > arr.shape[0]:
-                raise ValueError("Forcings plus courts que la grille temporelle demandée.")
+                raise ValueError("Forcings are shorter than the requested time grid.")
             d_arrays[key] = arr[offset : offset + n]
 
         y_list: list[np.ndarray] = []
@@ -358,7 +358,7 @@ class Simulation_JAX(eqx.Module):
 
         return t_grid, y, states, u_record_arrays, ctrl_states, mpc_logs
 
-    # ---------- Plot (inchangé) ----------
+    # ---------- Plot (unchanged) ----------
 
     def plot(
         self,
@@ -368,12 +368,12 @@ class Simulation_JAX(eqx.Module):
         NP=False,
         x0=None,
         y_meas=None,
-        y_meas_label="mes",
+        y_meas_label="meas",
         setpoints=None,
         disturbances_meas=None,
         precomputed=None,
     ):
-        """Exécute la simulation et trace états, sorties, perturbations et commande."""
+        """Run the simulation and plot states, outputs, disturbances and control."""
         if precomputed is not None:
             res = precomputed
         else:
@@ -381,7 +381,7 @@ class Simulation_JAX(eqx.Module):
             theta_used = theta if theta is not None else self.model.theta
             res = run_fn(theta_used, x0=x0)
 
-        # Compatibilité avec différents formats de retour possibles
+        # Compatibility with different possible return formats
         if len(res) == 6:
             t, y_sim, states, controls, _ctrl_states, mpc_forecasts = res
         elif len(res) == 5:
@@ -394,7 +394,7 @@ class Simulation_JAX(eqx.Module):
             states = controls = None
             mpc_forecasts = None
 
-        # Commande principale (si disponible) : on privilégie l'ordre de `control_names`.
+        # Main control (if available): prefer the order of `control_names`.
         u_sim = None
         u_name = None
         u_unit = None
@@ -422,15 +422,15 @@ class Simulation_JAX(eqx.Module):
             elif isinstance(c_units, tuple) and len(c_units) > 0:
                 u_unit = c_units[0]
 
-        # Métadonnées de sortie (noms/unité) si le modèle les fournit
+        # Output metadata (names/units) if the model provides them
         y_names = getattr(self.model, "output_names", None)
         y_units = getattr(self.model, "output_units", None)
 
-        # États
+        # States
         state_names = getattr(self.model, "state_names", None)
         state_units = getattr(self.model, "state_units", None)
 
-        # Perturbations simulées : on tronque à la longueur de la simulation
+        # Simulated disturbances: truncate to the simulation length
         n = int(jnp.asarray(y_sim).shape[0])
         dist_all = {}
         for key, full in self.d.items():
@@ -461,11 +461,11 @@ class Simulation_JAX(eqx.Module):
             y_meas_label=y_meas_label,
         )
 
-    # ---------- Intégrateurs ----------
+    # ---------- Integrators ----------
 
     @staticmethod
     def rk4_step(rhs, state, dt):
-        """Effectue un pas de Runge–Kutta 4."""
+        """Perform a Runge–Kutta 4 step."""
         h = jnp.maximum(dt, 0.0)
         k1 = rhs(state)
         k2 = rhs(state + 0.5 * h * k1)
@@ -475,7 +475,7 @@ class Simulation_JAX(eqx.Module):
 
     @staticmethod
     def rk2_step(rhs, state, dt):
-        """Effectue un pas de Runge–Kutta 2 (schéma de Heun)."""
+        """Perform a Runge–Kutta 2 step (Heun's method)."""
         h = jnp.maximum(dt, 0.0)
         k1 = rhs(state)
         k2 = rhs(state + h * k1)
@@ -484,33 +484,33 @@ class Simulation_JAX(eqx.Module):
 
     @staticmethod
     def euler_step(rhs, state, dt):
-        """Effectue un pas d'Euler explicite."""
+        """Perform an explicit Euler step."""
         h = jnp.maximum(dt, 0.0)
         return state + h * rhs(state)
 
 @dataclass(frozen=True)
 class Sim_and_Data:
-    """Couplage minimal entre une simulation JAX et un dataset structuré.
+    """Minimal coupling between a JAX simulation and a structured dataset.
 
-    Cette classe relie :
-    - une instance `Simulation_JAX`,
-    - un `SimulationDataset` décrivant les forcings,
-    - des mesures `y_meas` à utiliser pour l'identification ou la visualisation,
-    - un vecteur de poids `W` pour pondérer les sorties,
-    - une fonction optionnelle d'initialisation d'état à partir des données.
+    This class links:
+    - a `Simulation_JAX` instance,
+    - a `SimulationDataset` describing forcings,
+    - measurements `y_meas` used for identification or visualization,
+    - a weight vector `W` to weight outputs,
+    - an optional state-initialization function from data.
 
-    Attributs
+    Attributes
     ---------
     simulation : Simulation_JAX
-        Simulation de référence (modèle + contrôleur).
+        Reference simulation (model + controller).
     dataset : SimulationDataset
-        Données d'entrée (u, d) et grille de temps.
+        Input data (u, d) and time grid.
     y_meas : jnp.ndarray
-        Mesures empilées (N, ny) alignées avec les sorties `h`.
+        Stacked measurements (N, ny) aligned with outputs `h`.
     W : jnp.ndarray | None
-        Poids par sortie (ny,), utilisés dans le résidu d'identification.
+        Per-output weights (ny,), used in the identification residual.
     initial_state_fn : Callable[[Sim_and_Data, dict[str, Any]], jnp.ndarray] | None
-        Fonction qui reconstruit un état initial x0 à partir des données et de theta.
+        Function that reconstructs an initial state x0 from data and theta.
     """
 
     simulation: Simulation_JAX
@@ -520,48 +520,48 @@ class Sim_and_Data:
     initial_state_fn: Callable[["Sim_and_Data", dict[str, Any]], jnp.ndarray] | None = None
 
     def copy(self, **overrides):
-        """Crée une copie avec certains champs remplacés.
+        """Create a copy with some fields overridden.
 
-        Paramètres
+        Parameters
         ----------
         **overrides
-            Attributs à remplacer sur l'instance courante.
+            Attributes to override on the current instance.
 
-        Retour
+        Returns
         ------
         Sim_and_Data
-            Nouvelle instance avec les attributs mis à jour.
+            New instance with updated attributes.
         """
         return replace(self, **overrides)
 
     def simulation_for_dataset(self):
-        """Adapte la simulation à l'horizon et aux forcings du dataset.
+        """Adapt the simulation to the dataset horizon and forcings.
 
-        Retour
+        Returns
         ------
         Simulation_JAX
-            Copie de `simulation` avec `time_grid` et `d` alignés sur le dataset.
+            Copy of `simulation` with `time_grid` and `d` aligned to the dataset.
         """
         data = self.dataset
         return self.simulation.copy(time_grid=data.time, d=data.d)
 
     @staticmethod
     def estimate_derivative(time, values, window=5):
-        """Estime une dérivée moyenne sur une courte fenêtre initiale.
+        """Estimate an average derivative over a short initial window.
 
-        Paramètres
+        Parameters
         ----------
         time : jnp.ndarray
-            Grille temporelle (N,).
+            Time grid (N,).
         values : jnp.ndarray
-            Série scalaire (N,).
-        window : int, optionnel
-            Longueur de la fenêtre utilisée pour l'estimation.
+            Scalar series (N,).
+        window : int, optional
+            Window length used for the estimate.
 
-        Retour
+        Returns
         ------
         jnp.ndarray
-            Estimation scalaire de la dérivée sur la fenêtre initiale.
+            Scalar estimate of the derivative on the initial window.
         """
         n = int(min(window, values.size))
         if n < 2:
@@ -574,17 +574,17 @@ class Sim_and_Data:
         return jnp.asarray(deriv, dtype=jnp.float64)
 
     def build_setpoint_profile(self, length):
-        """Construit une trajectoire de consigne alignée sur l'horizon.
+        """Build a setpoint trajectory aligned with the horizon.
 
-        Paramètres
+        Parameters
         ----------
         length : int
-            Longueur de la trajectoire souhaitée.
+            Desired trajectory length.
 
-        Retour
+        Returns
         ------
         jnp.ndarray | None
-            Vecteur de consigne (length,) ou None si aucune information de consigne.
+            Setpoint vector (length,) or None if no setpoint information is available.
         """
         controller = self.simulation.controller
         raw = getattr(controller, "SetPoints", None)
@@ -623,48 +623,48 @@ class Sim_and_Data:
         setpoints=None,
         path=None,
         mpc_forecasts=None,
-        y_meas_label: str = "mes",
+        y_meas_label: str = "meas",
     ):
-        """Trace générique des états, sorties, perturbations et commandes.
+        """Generic plot for states, outputs, disturbances and controls.
 
-        Les grandeurs sont regroupées par type (états, perturbations, sorties, commandes),
-        puis, au sein de chaque groupe, par unité physique (K, W, -, ...). Chaque
-        (groupe, unité) est tracé sur un subplot distinct.
+        Quantities are grouped by type (states, disturbances, outputs, controls),
+        then, within each group, by physical unit (K, W, -, ...). Each
+        (group, unit) is plotted on a separate subplot.
 
-        Paramètres
+        Parameters
         ----------
         time : jnp.ndarray
-            Grille de temps commune à tous les signaux (N,).
+            Time grid shared by all signals (N,).
         states : jnp.ndarray | None
-            Trajectoire des états (N, nx) ou None.
+            State trajectory (N, nx) or None.
         state_names/state_units : tuple[str, ...] | None
-            Noms et unités des états.
+            State names and units.
         disturbances : dict[str, jnp.ndarray] | None
-            Perturbations simulées indexées par nom (N,).
+            Simulated disturbances keyed by name (N,).
         disturbances_meas : dict[str, jnp.ndarray] | None
-            Perturbations mesurées indexées par nom (N,) à comparer aux perturbations simulées.
+            Measured disturbances keyed by name (N,) to compare to simulated disturbances.
         dist_names/dist_units : tuple[str, ...] | None
-            Noms et unités des perturbations.
+            Disturbance names and units.
         y_sim : jnp.ndarray | None
-            Sorties simulées (N, ny).
+            Simulated outputs (N, ny).
         y_meas : jnp.ndarray | None
-            Sorties mesurées (N, ny), alignées sur y_sim.
+            Measured outputs (N, ny), aligned with y_sim.
         y_meas_label : str
-            Suffixe utilisé pour les courbes de mesure (par défaut 'mes').
+            Suffix used for measurement curves (default 'meas').
         y_names/y_units : tuple[str, ...] | None
-            Noms et unités des sorties.
+            Output names and units.
         u_sim : jnp.ndarray | None
-            Trajectoire de la commande simulée principale (N,) optionnelle.
+            Optional primary simulated control trajectory (N,).
         u_meas : jnp.ndarray | None
-            Trajectoire de la commande mesurée principale (N,) optionnelle.
+            Optional primary measured control trajectory (N,).
         u_name/u_unit : str | None
-            Nom et unité de la commande principale.
+            Name and unit of the primary control.
         setpoints : jnp.ndarray | None
-            Trajectoire de consigne à superposer aux sorties.
+            Setpoint trajectory to overlay on outputs.
         path : str | Path | None
-            Si fourni, chemin du fichier image à sauvegarder ; sinon, la figure est affichée.
+            If provided, path to save the image; otherwise the figure is shown.
         mpc_forecasts : list[dict] | None
-            Prévisions internes du MPC (avec clés time/y/u) à superposer au premier output/commande.
+            MPC internal forecasts (with keys time/y/u) to overlay on the first output/control.
         """
         import matplotlib.pyplot as plt
         from pathlib import Path
@@ -673,7 +673,7 @@ class Sim_and_Data:
         mpc_forecasts = mpc_forecasts or []
         groups: list[tuple[str, list[dict[str, object]]]] = []
 
-        # États
+        # States
         state_series: list[dict[str, object]] = []
         if states is not None:
             x_arr = jnp.asarray(states, dtype=jnp.float64)
@@ -716,11 +716,11 @@ class Sim_and_Data:
                     dist_series.append({"unit": unit, "label": f"{name} (sim)", "values": vals})
                 if disturbances_meas and name in disturbances_meas:
                     vals_m = jnp.asarray(disturbances_meas[name], dtype=jnp.float64)
-                    dist_series.append({"unit": unit, "label": f"{name} (mes)", "values": vals_m})
+                    dist_series.append({"unit": unit, "label": f"{name} (meas)", "values": vals_m})
         if dist_series:
             groups.append(("Disturbances", dist_series))
 
-        # Sorties
+        # Outputs
         output_series: list[dict[str, object]] = []
         primary_output_unit = None
         if y_sim is not None:
@@ -766,7 +766,7 @@ class Sim_and_Data:
                         }
                     )
 
-            # Setpoint éventuel : même unité que la première sortie
+            # Optional setpoint: same unit as the first output
             if setpoints is not None and ny > 0:
                 sp = jnp.asarray(setpoints[: y_arr.shape[0]], dtype=jnp.float64)
                 unit = y_units[0] or ""
@@ -780,7 +780,7 @@ class Sim_and_Data:
         if output_series:
             groups.append(("Outputs", output_series))
 
-        # Commandes
+        # Controls
         control_series: list[dict[str, object]] = []
         main_control_unit = None
         if u_sim is not None:
@@ -793,12 +793,12 @@ class Sim_and_Data:
             u_m_arr = jnp.asarray(u_meas, dtype=jnp.float64)
             unit = u_unit or ""
             label = u_name
-            control_series.append({"unit": unit or "cmd", "label": f"{label} (mes)", "values": u_m_arr})
+            control_series.append({"unit": unit or "cmd", "label": f"{label} (meas)", "values": u_m_arr})
             main_control_unit = main_control_unit or (unit or "cmd")
         if control_series:
             groups.append(("Controls", control_series))
 
-        # Place les perturbations en dernier pour la lisibilité
+        # Put disturbances last for readability
         if groups:
             dist_pairs = []
             other_pairs = []
@@ -809,7 +809,7 @@ class Sim_and_Data:
                     other_pairs.append((name, series))
             groups = other_pairs + dist_pairs
 
-        # Calcul du nombre total de subplots (groupes × unités)
+        # Total number of subplots (groups × units)
         total_rows = 0
         group_units: list[list[str]] = []
         for _, series in groups:
@@ -822,7 +822,7 @@ class Sim_and_Data:
             total_rows += max(len(units), 1)
 
         if total_rows == 0:
-            return  # rien à tracer
+            return  # nothing to plot
 
         fig, axes = plt.subplots(total_rows, 1, sharex=True, figsize=(10, 2 + 2 * total_rows))
         if total_rows == 1:
@@ -837,7 +837,7 @@ class Sim_and_Data:
                 ax = axes[row_idx]
                 axis_lookup[(group_name, unit)] = ax
                 row_idx += 1
-                # titre sur la première unité du groupe
+                # title on the first unit of the group
                 if unit == units[0]:
                     ax.set_title(group_name)
                 for s in series:
@@ -851,7 +851,7 @@ class Sim_and_Data:
                         ax.plot(t_days[:n_vals], vals, label=s["label"], linestyle="--")
                     else:
                         ax.plot(t_days[:n_vals], vals, label=s["label"])
-                ylabel = f"[{unit}]" if unit else "valeurs"
+                ylabel = f"[{unit}]" if unit else "values"
                 ax.set_ylabel(ylabel)
                 ax.grid(alpha=0.3)
                 ax.legend()
@@ -901,13 +901,13 @@ class Sim_and_Data:
                         continue
                     label = None if label_done else "u (MPC plan)"
                     alpha = 0.3 if label_done else 0.8
-                    # ZOH pour le plan MPC
+                    # ZOH for the MPC plan
                     ax_ctrl.step(t_fc[:m] / _SECONDS_PER_DAY, u_arr[:m], where="post", color="green", linestyle=":", linewidth=0.9, alpha=alpha, label=label)
                     label_done = True
                 if label_done:
                     ax_ctrl.legend()
 
-        axes[-1].set_xlabel("Temps (jours)")
+        axes[-1].set_xlabel("Time (days)")
 
         fig.tight_layout()
         if path:
@@ -918,10 +918,10 @@ class Sim_and_Data:
         else:
             plt.show()
 
-    # === Identification LM générique ===
+    # === Generic LM identification ===
 
     def build_residual_lm(self):
-        """-> Callable[[dict], jnp.ndarray]. Résidu empilé général sur y."""
+        """-> Callable[[dict], jnp.ndarray]. General stacked residual on y."""
         y_meas = jnp.asarray(self.y_meas, dtype=jnp.float64)
         if y_meas.ndim == 1:
             y_meas = y_meas[:, None]
@@ -960,7 +960,7 @@ class Sim_and_Data:
         return jax.jit(residual)
 
     def plot(self, theta=None, *, path=None, theta_initial=None, NP=False):
-        """Trace y_sim vs y_meas ainsi que les perturbations et commandes sim/mes."""
+        """Plot y_sim vs y_meas, along with simulated/measured disturbances and controls."""
         sim = self.simulation_for_dataset()
         theta_used = theta if theta is not None else sim.model.theta
 
@@ -984,7 +984,7 @@ class Sim_and_Data:
             states = controls = None
             mpc_forecasts = None
 
-        # Commande principale simulée
+        # Main simulated control
         u_sim = None
         u_name = None
         u_unit = None
@@ -1007,12 +1007,12 @@ class Sim_and_Data:
             elif isinstance(c_units, tuple) and len(c_units) > 0:
                 u_unit = c_units[0]
 
-        # Commande principale mesurée (si disponible dans le dataset)
+        # Main measured control (if available in the dataset)
         u_meas = None
         if u_name is not None and u_name in self.dataset.u:
             u_meas = jnp.asarray(self.dataset.u[u_name], dtype=jnp.float64)
 
-        # Perturbations simulées et mesurées
+        # Simulated and measured disturbances
         n = int(jnp.asarray(y_sim).shape[0])
         dist_sim = {}
         for key, full in sim.d.items():
@@ -1021,7 +1021,7 @@ class Sim_and_Data:
         for key, full in self.dataset.d.items():
             dist_meas[key] = jnp.asarray(full, dtype=jnp.float64)[:n]
 
-        # Métadonnées depuis le modèle
+        # Metadata from the model
         y_names = getattr(sim.model, "output_names", None)
         y_units = getattr(sim.model, "output_units", None)
         state_names = getattr(sim.model, "state_names", None)
@@ -1161,26 +1161,26 @@ def fit_lm(
     tol: float = 1e-6,
     verbose: bool = True,
 ) -> FitResult:
-    """Ajuste les paramètres du modèle via Levenberg–Marquardt sur les sorties y.
+    """Fit model parameters via Levenberg–Marquardt on outputs y.
 
-    Paramètres
+    Parameters
     ----------
     sim_data : Sim_and_Data
-        Couplage simulation/données contenant la simulation de référence et les mesures.
-    bounds : dict[str, Any] | None, optionnel
-        Dictionnaire de bornes (lb/ub) ayant la même structure que `theta`.
-    maxiter : int, optionnel
-        Nombre maximal d'itérations du solveur LM.
-    tol : float, optionnel
-        Tolérance de convergence (résidu et paramètres).
-    verbose : bool, optionnel
-        Si True, active la verbosité du solveur LM.
+        Simulation/data coupling containing the reference simulation and measurements.
+    bounds : dict[str, Any] | None, optional
+        Bounds dictionary (lb/ub) with the same structure as `theta`.
+    maxiter : int, optional
+        Maximum number of LM solver iterations.
+    tol : float, optional
+        Convergence tolerance (residual and parameters).
+    verbose : bool, optional
+        If True, enable LM solver verbosity.
 
-    Retour
+    Returns
     ------
     FitResult
-        Objet immuable contenant le `theta` identifié, les métriques d'optimisation,
-        et une copie de la simulation avec le modèle mis à jour.
+        Immutable object containing the identified `theta`, optimization metrics,
+        and a copy of the simulation with the updated model.
     """
     import math
     import time as _time
@@ -1252,16 +1252,16 @@ def fit_lm(
 
 
 def print_report(sim_data: Sim_and_Data, fit: FitResult, header: str = "Identification"):
-    """Affiche en console un rapport texte basé sur les métriques de `fit_lm`.
+    """Print a text report based on the `fit_lm` metrics.
 
-    Paramètres
+    Parameters
     ----------
     sim_data : Sim_and_Data
-        Couplage simulation/données (non utilisé ici, conservé pour signature homogène).
+        Simulation/data coupling (unused here; kept for a uniform signature).
     fit : FitResult
-        Résultat d'identification renvoyé par `fit_lm`.
-    header : str, optionnel
-        Titre affiché en tête du rapport.
+        Identification result returned by `fit_lm`.
+    header : str, optional
+        Title printed at the top of the report.
     """
     metrics = fit.metrics or {}
     lines = [header + ":"]

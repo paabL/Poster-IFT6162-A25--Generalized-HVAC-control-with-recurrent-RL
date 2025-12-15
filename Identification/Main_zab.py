@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 
-# Ajout du repo root au PYTHONPATH pour les imports locaux
+# Add repo root to PYTHONPATH for local imports
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -20,8 +20,8 @@ from Identification.Utils import RC5_steady_state_sys
 from Identification.Validation import Validation_RC5
 
 
-# Bornes : on identifie uniquement la partie thermique (5 températures),
-# la PAC reste figée à ses valeurs initiales.
+# Bounds: identify only the thermal part (5 temperatures),
+# keeping the heat pump fixed at its initial values.
 def _scale_bounds_th(group, alpha):
     def f(v):
         if v["ub"] >= 0:
@@ -48,7 +48,7 @@ SIM_PATH_ZAB = Path("Models/sim_opti_zab.pkl")
 
 
 def rc5_state_derivative_meas_qc(state, theta, Ta, Q_solar, Q_con, Q_rad, Qc_meas):
-    """Dynamique RC5 en utilisant Qc mesuré (sans carte PAC)."""
+    """RC5 dynamics using measured Qc (no heat pump map)."""
     th = theta["th"]
     Tz, Tw, Ti, Tf, Tc = state
     Q_occ = Q_con + Q_rad
@@ -68,7 +68,7 @@ def rc5_state_derivative_meas_qc(state, theta, Ta, Q_solar, Q_con, Q_rad, Qc_mea
 
 
 def rc5_state_fn_zab(x, u, d, theta):
-    """Dérivée RC5 pour ZAB, forcée par Qc mesuré."""
+    """RC5 derivative for ZAB, forced by measured Qc."""
     Q_con = jnp.asarray(d["InternalGainsCon[1]"])
     Q_rad = jnp.asarray(d["InternalGainsRad[1]"])
     Q_solar = jnp.asarray(d["weaSta_reaWeaHGloHor_y"])
@@ -78,7 +78,7 @@ def rc5_state_fn_zab(x, u, d, theta):
 
 
 def rc5_output_fn_zab(x, u, d, theta):
-    """Observation RC5 pour ZAB : Tz simulé, Qc/Qe mesurés."""
+    """RC5 observation for ZAB: simulated Tz, measured Qc/Qe."""
     state = jnp.asarray(x)
     tz = state[0]
     qc = jnp.asarray(d["reaQHeaPumCon_y"])
@@ -87,7 +87,7 @@ def rc5_output_fn_zab(x, u, d, theta):
 
 
 def initial_stateRC5_zab(sim_data, theta):
-    """État initial RC5 pour ZAB, basé sur Qc mesuré."""
+    """RC5 initial state for ZAB, based on measured Qc."""
     data = sim_data.dataset
     ta0 = data.d["weaSta_reaWeaTDryBul_y"][0]
     qocc0 = data.d["InternalGainsCon[1]"][0]
@@ -98,14 +98,14 @@ def initial_stateRC5_zab(sim_data, theta):
 
 
 def main():
-    # Jeu d'entraînement pour l'identification (mêmes données que Main.py)
+    # Training set for identification (same data as Main.py)
     dataset = SimulationDataset.from_csv(
         TRAIN_CSV,
         control_cols=CONTROL_COLS,
         disturbance_cols=DISTURBANCE_COLS,
     ).take_fraction(GAMMA)
 
-    # État initial à l'équilibre pour RC5
+    # Steady-state initial state for RC5
     ta0 = dataset.d["weaSta_reaWeaTDryBul_y"][0]
     qocc0 = dataset.d["InternalGainsCon[1]"][0]
     qocr0 = dataset.d["InternalGainsRad[1]"][0]
@@ -113,7 +113,7 @@ def main():
     qsol0 = dataset.d["weaSta_reaWeaHGloHor_y"][0]
     x0 = RC5_steady_state_sys(ta0, qsol0, qocc0, qocr0, qcd0, THETA_INIT_ZAB)
 
-    # Modèle RC5 thermique, forcé par Qc mesuré (la PAC n'est plus modélisée).
+    # Thermal RC5 model, forced by measured Qc (the heat pump is no longer modeled).
     model = Model_JAX(
         theta=THETA_INIT_ZAB,
         state_fn=rc5_state_fn_zab,
@@ -137,7 +137,7 @@ def main():
         x0=x0,
     )
 
-    # Mesures dans l'ordre des sorties (Tz, Qc_dot, Qe_dot)
+    # Measurements in the output order (Tz, Qc_dot, Qe_dot)
     y_meas = jnp.stack(
         (
             dataset.d["reaTZon_y"],
@@ -147,7 +147,7 @@ def main():
         axis=-1,
     )
 
-    # Critère d'identification : uniquement Tz (poids nuls sur Qc_dot, Qe_dot).
+    # Identification objective: Tz only (zero weights on Qc_dot, Qe_dot).
     W = jnp.asarray([1.0, 0.0, 0.0], dtype=jnp.float64)
 
     sim_data = Sim_and_Data(
@@ -165,10 +165,10 @@ def main():
         tol=1e-6,
         verbose=True,
     )
-    print_report(sim_data, fit, header="Identification (RC5 thermique seul)")
+    print_report(sim_data, fit, header="Identification (thermal-only RC5)")
     sim_data.plot(theta=fit.theta, path=IDENT_PLOT_PATH_ZAB)
 
-    # Validation sur dataset indépendant, avec état initial cohérent avec le dataset de validation.
+    # Validation on an independent dataset, with an initial state consistent with the validation dataset.
     val_dataset = SimulationDataset.from_csv(
         VALIDATION_CSV,
         control_cols=CONTROL_COLS,
@@ -186,7 +186,7 @@ def main():
     _ = validator.report(val_state)
     validator.plot(path=VALIDATION_PLOT_PATH_ZAB)
 
-    # Sauvegarde d'une simulation optimisée spécifique à cette identification.
+    # Save an optimized simulation specific to this identification.
     sim_opti = fit.simulation.copy()
     sim_opti.save_simulation(SIM_PATH_ZAB)
 

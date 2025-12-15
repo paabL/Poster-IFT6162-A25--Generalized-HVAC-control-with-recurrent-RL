@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# Permet d'exécuter ce script depuis `MPC/` (imports relatifs au projet).
+# Allows running this script from `MPC/` (project-relative imports).
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -19,22 +19,22 @@ from Utils.utils import RC5_steady_state_sys, scale_rc5_building
 from Utils.rc5_cost import interval_components
 from gymRC5 import dataset_short, sim_opti_loaded
 
-# -------------------- Config (aligné test_1FALSTM) --------------------
-START_TIME_S = 28 * 24 * 3600  # 1er février si t=0 = 1er janvier
+# -------------------- Config (aligned with test_1FALSTM) --------------------
+START_TIME_S = 28 * 24 * 3600  # Feb 1st if t=0 = Jan 1st
 WARMUP_DAYS = 4
 EPISODE_DAYS = 7
 
 BASE_SETPOINT_K = 273.15 + 21.0  # warmup PID
-MPC_STEP_S = 300                # recompute u toutes les 1h
+MPC_STEP_S = 300                # recompute u every hour
 MPC_HORIZON_H = 24               # horizon MPC
 INTEGRATOR = "euler"
 
 # cost = W[0]*energy(€) + W[1]*comfort(K·h)
-# + W[2]*∫u² dt (unit²·h) pour régulariser la commande.
+# + W[2]*∫u² dt (unit²·h) to regularize the control.
 W = jnp.asarray([1.0, 5.0, 0.05], dtype=jnp.float64)
 OUT_PATH = ROOT / "MPC" / "figures" / "mpc_rc5_week_feb_warmup4.png"
 
-# k : fait évoluer les propriétés du building (scaling des paramètres "th")
+# k: changes building properties (scaling of thermal parameters "th")
 K: dict[str, float] = {"k_size": 1.1, "k_U": 0.9, "k_inf": 1.1, "k_win": 0.9, "k_mass": 1.1}
 
 
@@ -43,7 +43,7 @@ def _window(ds, t0_s: float, t1_s: float) -> tuple[jnp.ndarray, dict[str, jnp.nd
     i0 = int(np.searchsorted(t, float(t0_s), side="left"))
     i1 = int(np.searchsorted(t, float(t1_s), side="left"))
     if i0 < 0 or i1 >= t.size:
-        raise ValueError("Fenêtre warmup/épisode hors du dataset.")
+        raise ValueError("Warmup/episode window out of the dataset.")
     sl = slice(i0, i1 + 1)
     return ds.time[sl], {k: v[sl] for k, v in ds.d.items()}
 
@@ -52,7 +52,7 @@ def cost_core(
     u_window_bloc,
     x_i,
     i,
-    setpoints,  # unused (bandes confort utilisées)
+    setpoints,  # unused (comfort bands used)
     sim,
     time_grid,  # unused
     window_size,
@@ -90,8 +90,8 @@ def cost_core(
     occ = jnp.asarray(sim.d["occupancy"][i:end_idx], dtype=jnp.float64)
     price = jnp.asarray(sim.d["electricity_price"][i:end_idx], dtype=jnp.float64)
 
-    # Alignement "comme gymRC5" : coûts sur les intervalles (t[:-1])
-    t_step = t[:-1]  # secondes, N
+    # Alignment "like gymRC5": costs on intervals (t[:-1])
+    t_step = t[:-1]  # seconds, N
     tz_seq = tz[1:]  # K, N
     php = (qc - jnp.abs(qe))[:-1]  # W, N
 
@@ -129,7 +129,7 @@ def _plot(
     def _days(x) -> np.ndarray:
         return np.asarray(x, dtype=float) / 86400.0
 
-    # Données "main" (épisode) à la résolution dataset
+    # "Main" data (episode) at dataset resolution
     t_days_main = _days(t)
     tz_c = np.asarray(y[:, 0], dtype=float) - 273.15
 
@@ -139,14 +139,14 @@ def _plot(
     elif u_arr_raw.size == max(0, t_days_main.size - 1):
         u_arr = np.concatenate([u_arr_raw, u_arr_raw[-1:]]) if u_arr_raw.size else np.zeros_like(tz_c)
     else:
-        # fallback : recale au mieux sur la taille de t (plot uniquement)
+        # fallback: best-effort match to the length of t (plot only)
         u_arr = np.resize(u_arr_raw, t_days_main.size) if u_arr_raw.size else np.zeros_like(tz_c)
 
     qc_arr = np.asarray(y[:, 1], dtype=float) if y.shape[1] > 1 else np.zeros_like(tz_c)
     qe_arr = np.asarray(y[:, 2], dtype=float) if y.shape[1] > 2 else np.zeros_like(tz_c)
     php_arr = qc_arr - np.abs(qe_arr)
 
-    # Conso (kWh) sur l'épisode à partir de P_hp (W)
+    # Consumption (kWh) over the episode from P_hp (W)
     if t_days_main.size >= 2:
         energy_kwh = float(np.trapezoid(np.maximum(php_arr, 0.0) / 1000.0, x=t_days_main * 24.0))
     else:
@@ -162,14 +162,14 @@ def _plot(
     prob = occupancy_probability(np.asarray(t, dtype=float))
     price = np.asarray(d["electricity_price"], dtype=float)
 
-    # "Pas RL" ≈ pas MPC (ZOH)
+    # "RL step" ≈ MPC step (ZOH)
     t_np = np.asarray(t, dtype=float)
-    t_left = t_np[:-1]  # secondes
+    t_left = t_np[:-1]  # seconds
     blocks = np.arange(0, t_left.size, nZOH, dtype=int)
     t_days_rl = _days(t_np[blocks]) if blocks.size else np.asarray([], dtype=float)
     sp_rl = (np.asarray(setpoints, dtype=float) - 273.15)[blocks] if blocks.size else np.asarray([], dtype=float)
 
-    # Reward/terms au pas MPC (mêmes conventions que gymRC5 : termes négatifs, en euros)
+    # Reward/terms per MPC step (same conventions as gymRC5: negative terms, in euros)
     tz_k = np.asarray(y[:, 0], dtype=float)
     lower_k = np.asarray(d["LowerSetp[1]"], dtype=float)
     upper_k = np.asarray(d["UpperSetp[1]"], dtype=float)
@@ -177,7 +177,7 @@ def _plot(
     price_k = np.asarray(d["electricity_price"], dtype=float)
     php_watts = np.asarray(php_arr, dtype=float)
 
-    tz_seq_k = tz_k[1:]  # aligné intervalles
+    tz_seq_k = tz_k[1:]  # interval-aligned
     comfort_dev_k = np.maximum(lower_k[:-1] - tz_seq_k, 0.0) + np.maximum(tz_seq_k - upper_k[:-1], 0.0)
     comfort_y = comfort_dev_k * occ_k[:-1]  # K
     energy_y = price_k[:-1] * (np.maximum(php_watts[:-1], 0.0) / 1000.0)  # €/h
@@ -235,7 +235,7 @@ def _plot(
         energy_label = f"energy ({energy_pct:.0f}%, {total_energy:.2f}€)"
         sat_label = f"sat ({sat_pct:.0f}%, {total_sat:.2f}€)"
 
-    # Warmup (format et style alignés sur gymRC5.MyMinimalEnv._plot_episode)
+    # Warmup (format and style aligned with gymRC5.MyMinimalEnv._plot_episode)
     warm_time = _days(t_w)
     warm_tz = (np.asarray(y_w[:, 0], dtype=float) - 273.15) if y_w.size else np.asarray([], dtype=float)
     warm_u_raw = np.asarray(u_w.get("oveHeaPumY_u", np.array([], dtype=float)), dtype=float)
@@ -272,8 +272,8 @@ def _plot(
             ax.axvspan(warmup_span[0], warmup_span[1], color="khaki", alpha=0.15, zorder=0)
         axs[0].plot([warmup_span[0]], [np.nan], color="khaki", alpha=0.3, linewidth=6, label="warmup")
 
-    # Bande confort
-    axs[0].plot(t_days_main, lower_c, "--", color="seagreen", linewidth=1, label="Bande confort")
+    # Comfort band
+    axs[0].plot(t_days_main, lower_c, "--", color="seagreen", linewidth=1, label="Comfort band")
     axs[0].plot(t_days_main, upper_c, "--", color="seagreen", linewidth=1)
     if has_warmup:
         axs[0].plot(warm_time, w_sp, "-", color="gray", linewidth=1, alpha=0.8, label="warmup setpoint")
@@ -285,7 +285,7 @@ def _plot(
     axs[0].plot(t_days_main, tz_c, "-", color="darkorange", linewidth=1, label="Tz")
     axs[0].set_ylabel("Tz / setpoint\n(°C)")
 
-    # Bandes : prix max (rouge) + occ min (hachures bleues), aligné gymRC5
+    # Bands: max price (red) + min occ (blue hatching), aligned with gymRC5
     if price.size:
         p_max = float(price.max())
         mask_max = np.isclose(price, p_max, rtol=1e-5, atol=1e-8)
@@ -304,7 +304,7 @@ def _plot(
                         color="lightcoral",
                         alpha=0.18,
                         zorder=0,
-                        label="Prix max" if first_span_price else None,
+                        label="Max price" if first_span_price else None,
                     )
                     first_span_price = False
                     start = prev = k
@@ -315,7 +315,7 @@ def _plot(
                 color="lightcoral",
                 alpha=0.18,
                 zorder=0,
-                label="Prix max" if first_span_price else None,
+                label="Max price" if first_span_price else None,
             )
 
     if prob.size:
@@ -406,10 +406,10 @@ def _plot(
     axs[7].plot(t_days_main, price, color="black", linewidth=1)
     if has_warmup:
         axs[7].plot(warm_time, w_price, "-", color="black", linewidth=1, alpha=0.7)
-    axs[7].set_ylabel("Prix\n(€/kWh)")
-    axs[7].set_xlabel("Temps (jours)")
+    axs[7].set_ylabel("Price\n(€/kWh)")
+    axs[7].set_xlabel("Time (days)")
 
-    fig.suptitle(f"MPC | conso={energy_kwh:.1f} kWh")
+    fig.suptitle(f"MPC | consumption={energy_kwh:.1f} kWh")
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.tight_layout()
@@ -423,7 +423,7 @@ def main() -> None:
     sim_building = sim_opti_loaded.copy(model=model_scaled)
 
     if int(dataset_short.time.shape[0]) < 2:
-        raise ValueError("dataset_short.time doit contenir au moins deux points.")
+        raise ValueError("dataset_short.time must contain at least two points.")
     dt_s = float(dataset_short.time[1] - dataset_short.time[0])
 
     nZOH = max(1, int(round(MPC_STEP_S / dt_s)))

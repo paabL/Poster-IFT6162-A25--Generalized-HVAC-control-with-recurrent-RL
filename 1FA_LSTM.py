@@ -20,9 +20,9 @@ CFG = dict(
     n_envs=4,
     seed=0,
     fixed_model_idx=None,
-    total_timesteps=1_000_000,
-    model_path="Pre_ppo_rc5_1FA_LSTM.zip",
-    vecnorm_path="vecnormalize_stats_1FA_LSTM.pkl",
+    total_timesteps=5_000_000,
+    model_path="Pre_ppo_rc5_1FA_LSTM_VHE.zip",
+    vecnorm_path="vecnormalize_stats_1FA_LSTM_VHE.pkl",
 )
 
 ENV_CFG = dict(
@@ -32,16 +32,16 @@ ENV_CFG = dict(
     warmup_steps=4 * 24,
     base_setpoint=273.15 + 21.0,
     # reward = -(w_energy*energy(€) + w_comfort*comfort(K·h) + w_sat*sat(unit·h))
-    # Augmenter `w_comfort` => plus de confort (moins de violations), souvent + d'énergie.
-    # Augmenter `w_energy`  => moins d'énergie, souvent + d'inconfort.
-    w_energy=2.0,
+    # Increasing `w_comfort` => more comfort (fewer violations), often more energy.
+    # Increasing `w_energy`  => less energy, often more discomfort.
+    w_energy=4.0,
     w_comfort=1.0, 
-    # Adoucit la pénalité confort près de 0 (Huber, en Kelvin).
-    # Si comfort_huber_k > 0, une petite violation est moins pénalisée (évite que l'agent "ait peur" d'approcher).
+    # Smooths the comfort penalty near 0 (Huber, in Kelvin).
+    # If comfort_huber_k > 0, small violations are penalized less (avoids the agent being "afraid" to get close).
     comfort_huber_k=0.5,
     w_sat=0.2,
-    w_u=1.0/2*0, #Pas utilisé
-    w_tz=1.0/(273.15*5)*0, #Pas utilisé
+    w_u=1.0/2*0, # Not used
+    w_tz=1.0/(273.15*5)*0, # Not used
     render_episodes=True,
     max_episode_length=24 * 7,
     excluding_periods=[(28 * 24 * 3600, 36 * 24 * 3600)],
@@ -73,7 +73,7 @@ PPO_CFG = dict(
     learning_rate=lr_schedule,
     n_steps=256,
     batch_size=256,
-    n_epochs=3, #par default 10
+    n_epochs=3, # default is 10
     clip_range=0.2,
     target_kl=0.03,
     max_grad_norm=0.5,

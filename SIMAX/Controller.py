@@ -21,7 +21,7 @@ if TYPE_CHECKING:  # only for hints; avoids circular import
 # ------------------------------------------------------------------ #
 
 def _prepare_sim_window(sim, i, window_size, forecast):
-    """Prépare la simulation (time_grid et perturbations) pour une fenêtre donnée."""
+    """Prepare the simulation (time_grid and disturbances) for a given window."""
     num_time = sim.time_grid.shape[0]
     end_idx = min(i + window_size, num_time)
     window_grid = sim.time_grid[i:end_idx]
@@ -29,24 +29,24 @@ def _prepare_sim_window(sim, i, window_size, forecast):
     sim_run = sim
     if forecast is not None:
         d_forecast = forecast.get("d")
-        # Fallback: chercher les clés de sim.d dans forecast
+        # Fallback: look up keys from sim.d in forecast
         if d_forecast is None:
              d_forecast = {k: forecast[k] for k in sim.d if k in forecast}
         
         if d_forecast:
             new_d = {}
-            # 1. Découpage des perturbations existantes
+            # 1. Slice existing disturbances
             for k, v in sim.d.items():
                 v_arr = jnp.asarray(v)
                 new_d[k] = v_arr[i:end_idx] if v_arr.shape[0] >= end_idx else v_arr
-            # 2. Mise à jour avec le forecast
+            # 2. Update with forecast
             new_d.update(d_forecast)
             sim_run = sim.copy(d=new_d, time_grid=window_grid)
             
     return sim_run, window_grid, end_idx
 
 def _get_setpoints_window(setpoints, i, window_size, forecast, target_len, fallback_val=293.15):
-    """Récupère et adapte la fenêtre de consignes."""
+    """Get and adapt the setpoint window."""
     if forecast is not None and "ST_window" in forecast:
         sp_window = jnp.asarray(forecast["ST_window"], dtype=jnp.float64)
     else:
@@ -54,7 +54,7 @@ def _get_setpoints_window(setpoints, i, window_size, forecast, target_len, fallb
         end_sp = min(i + window_size, sp_full.shape[0])
         sp_window = sp_full[i:end_sp]
 
-    # Padding/Truncating pour matcher target_len
+    # Padding/truncating to match target_len
     m = sp_window.shape[0]
     if m == 0:
         return jnp.full((target_len,), fallback_val, dtype=jnp.float64)
@@ -71,7 +71,7 @@ def _get_setpoints_window(setpoints, i, window_size, forecast, target_len, fallb
 # ------------------------------------------------------------------ #
 
 class Controller(eqx.Module, ABC):
-    """Base class for controllers compatibles avec les simulations JAX."""
+    """Base class for controllers compatible with JAX simulations."""
 
     def init_state(self):
         return None
@@ -99,7 +99,7 @@ class Controller_Constant(Controller):
 
 
 class Controller_PID(Controller):
-    TSet: float = 273.15 + 21  # Setpoint unique par défaut
+    TSet: float = 273.15 + 21  # Default single setpoint
     k_p: float = 1.0
     k_d: float = 0.0
     k_i: float = 0.0
@@ -128,11 +128,11 @@ class Controller_PID(Controller):
         else:
             ctrl_state = dict(ctrl_state)
 
-        # Extraction de Tz depuis les mesures (ou state[0] si fallback)
+        # Extract Tz from measurements (or state[0] as fallback)
         if isinstance(y_measurements, dict) and "reaTZon_y" in y_measurements:
             tz = jnp.asarray(y_measurements["reaTZon_y"], dtype=jnp.float64)
         elif hasattr(y_measurements, "__getitem__") and len(y_measurements) > 0:
-             # Fallback si on passe une liste/array
+             # Fallback if a list/array is passed
              tz = jnp.asarray(y_measurements[0], dtype=jnp.float64)
         else:
              tz = jnp.asarray(293.15, dtype=jnp.float64) # Default fallback
@@ -172,7 +172,7 @@ class Controller_PID(Controller):
         ctrl_state["delta_sat"] = delta_sat
 
         if self.verbose:
-            msg = f"Index : {idx} | Tz : {float(tz):.2f} | Tset : {float(t_set):.2f} | Err : {float(err):.2f} | u : {float(u):.2f}"
+            msg = f"Index: {idx} | Tz: {float(tz):.2f} | Tset: {float(t_set):.2f} | Err: {float(err):.2f} | u: {float(u):.2f}"
             ctrl_state["last_log"] = msg
             print(msg)
 
@@ -205,47 +205,47 @@ class Controller_constSeq(Controller):
 
 def mpc_cost_core(u_window_bloc, x_i, i, setpoints, sim, time_grid, window_size, n, forecast=None):
     """
-    Calcule les coûts [énergie, confort] d’une fenêtre MPC (fonction pure JAX).
+    Compute MPC-window costs [energy, comfort] (pure JAX function).
 
-    À partir d’un bloc de commande `u_window_bloc` (une valeur par bloc), on
-    construit la commande fine `u_window` par répétition de chaque valeur `n`
-    fois puis tronquage à `horizon_len`, avant simulation du système et
-    intégration (trapèzes) de la puissance nette et de l’erreur de confort.
+    From a block control vector `u_window_bloc` (one value per block), we build
+    the fine control `u_window` by repeating each value `n` times and truncating
+    to `horizon_len`, then simulate the system and integrate (trapezoids) the
+    net power and the comfort error.
 
     Parameters
     ----------
     u_window_bloc : array_like
-        Commande réduite, répétée par blocs de taille n pour former `u_window`.
+        Reduced control, repeated in blocks of size n to form `u_window`.
     x_i : array_like
-        État initial au début de la fenêtre (indice i).
+        Initial state at the start of the window (index i).
     i : int
-        Indice courant dans la grille temporelle globale.
-    setpoints : array_like ou callable
-        Consignes de température sur l’horizon.
+        Current index in the global time grid.
+    setpoints : array_like or callable
+        Temperature setpoints over the horizon.
     sim : Simulation
-        Objet de simulation compatible avec `run(...)`.
+        Simulation object compatible with `run(...)`.
     time_grid : array_like
-        Grille temporelle globale.
+        Global time grid.
     window_size : int
-        Taille de la fenêtre de prédiction (en pas de temps).
+        Prediction window size (in time steps).
     n : int
-        Facteur de répétition des valeurs de `u_window_bloc`.
+        Repetition factor for values of `u_window_bloc`.
     forecast : optional
-        Données de prévision éventuelles pour la fenêtre.
+        Optional forecast data for the window.
 
     Returns
     -------
     jnp.ndarray
-        Tableau (2,) : [energy_cost, confort_cost].
+        Array (2,): [energy_cost, comfort_cost].
     """
     i = int(i)
     window_size = int(window_size)
     n = int(n)
 
-    # Préparation simulation
+    # Prepare simulation
     sim_run, window_grid, end_idx = _prepare_sim_window(sim, i, window_size, forecast)
 
-    # Reconstruction de la commande
+    # Reconstruct the control
     horizon_len = end_idx - i
     u_window = jnp.repeat(u_window_bloc, n)[:horizon_len]
     u_window = jnp.clip(u_window, 0.0, 1.0)
@@ -255,7 +255,7 @@ def mpc_cost_core(u_window_bloc, x_i, i, setpoints, sim, time_grid, window_size,
     controller = Controller_constSeq(oveHeaPumY_u=u_window)
     t, y_sim, _state, _controls = sim_run.run(time_grid=window_grid, x0=x_i, controller=controller)
 
-    # Extraction résultats
+    # Extract results
     y_arr = jnp.asarray(y_sim, dtype=jnp.float64)
     if y_arr.ndim == 1:
         y_arr = y_arr[:, None]
@@ -263,15 +263,15 @@ def mpc_cost_core(u_window_bloc, x_i, i, setpoints, sim, time_grid, window_size,
     qc_sim = y_arr[:, 1] if y_arr.shape[1] > 1 else jnp.zeros_like(tz_sim)
     qe_sim = y_arr[:, 2] if y_arr.shape[1] > 2 else jnp.zeros_like(tz_sim)
 
-    # Coûts
+    # Costs
     P_heatpump = qc_sim - qe_sim
     sp_window = _get_setpoints_window(setpoints, i, window_size, forecast, tz_sim.shape[0])
     delta_T = jnp.abs(sp_window - tz_sim)
 
     energy_cost = jnp.trapezoid(P_heatpump, t)
-    confort_cost = jnp.trapezoid(delta_T, t)
+    comfort_cost = jnp.trapezoid(delta_T, t)
 
-    return jnp.array([energy_cost, confort_cost])
+    return jnp.array([energy_cost, comfort_cost])
 
 
 
@@ -280,9 +280,9 @@ class Controller_MPC(Controller):
     """
     MPC skeleton controller.
     """
-    # NOTE: Ce contrôleur ne peut pas être jitté tel quel
-    # car il dépend de l'optimiseur SciPy (côté Python).
-    #TODO: Rendre le controlleur generique pour nimporte quelle simulation
+    # NOTE: This controller cannot be jitted as-is
+    # because it depends on the SciPy optimizer (Python side).
+    # TODO: Make the controller generic for any simulation
     sim: "Simulation_JAX"
     window_size: int
     n: int = 1 # Control every n steps
@@ -296,7 +296,7 @@ class Controller_MPC(Controller):
     _objective_jit_grad: Callable[..., Any] = eqx.field(init=False, repr=False, static=True)
 
     def init_state(self):
-        """Initialise l'état MPC."""
+        """Initialize the MPC state."""
         return {"i": 0, "x_i": self.sim.x0, "u_prev": 0.0, "u_window": None}
 
     def __post_init__(self):
@@ -341,7 +341,7 @@ class Controller_MPC(Controller):
 
     def get_forecast_trajectory(self, u_window, x_i, i, forecast=None):
         """
-        Simule la trajectoire prédite par le MPC pour une fenêtre donnée."""
+        Simulate the trajectory predicted by the MPC for a given window."""
         sim_run, window_grid, _ = _prepare_sim_window(self.sim, int(i), self.window_size, forecast)
         x_i = jnp.asarray(x_i, dtype=jnp.float64)
         u_window = jnp.clip(jnp.asarray(u_window, dtype=jnp.float64), 0.0, 1.0)
@@ -350,43 +350,43 @@ class Controller_MPC(Controller):
         return t, y_sim, x_sim
 
 
-    # On warmstart avant chaque optim tous les nZOH
+    # Warmstart before each optimization, every nZOH
     def warmstart_PID(self, ctrl_state, window_grid, x_i, window_len, end_idx, forecast, *, i, setpoints):
         """
-        Warmstart minimal du MPC à partir d'un PID et/ou du plan MPC précédent.
+        Minimal MPC warmstart from a PID and/or the previous MPC plan.
 
-        Deux cas :
-          - premier appel ou pas de plan MPC précédent : horizon complet PID,
-            puis réduction en blocs ZOH ;
-          - sinon : recyclage du plan MPC précédent, décalé d'un bloc et
-            complété en répétant la dernière valeur.
+        Two cases:
+          - first call or no previous MPC plan: full PID horizon,
+            then reduction into ZOH blocks;
+          - otherwise: recycle the previous MPC plan, shifted by one block and
+            completed by repeating the last value.
 
-        Paramètres
+        Parameters
         ----------
         ctrl_state : dict
-            État interne du contrôleur (x_i, latest_forecast, etc.).
+            Controller internal state (x_i, latest_forecast, etc.).
         window_grid : array_like
-            Grille temporelle locale de la fenêtre courante.
+            Local time grid for the current window.
         x_i : array_like
-            État courant estimé au début de la fenêtre.
+            Current estimated state at the start of the window.
         window_len : int
-            Longueur du vecteur de décision réduit (nombre de blocs ZOH).
+            Length of the reduced decision vector (number of ZOH blocks).
         end_idx : int
-            Indice de fin de fenêtre dans la grille globale (pour cohérence).
+            End index of the window in the global grid (for consistency).
         forecast : dict ou None
-            Données de prévision passées au simulateur.
+            Forecast data passed to the simulator.
 
-        Retour
+        Returns
         ------
         jnp.ndarray
-            Vecteur 1D de taille `window_len` utilisé comme initialisation.
+            1D vector of size `window_len` used as initialization.
         """
-        # Récupération éventuelle du plan précédent
+        # Optionally retrieve the previous plan
         u_window_prev = None
         if "latest_forecast" in ctrl_state:
             u_window_prev = ctrl_state["latest_forecast"].get("u_plan_window", None)
 
-        # Cas 1 : full PID (premier appel ou pas de plan MPC précédent)
+        # Case 1: full PID (first call or no previous MPC plan)
         if u_window_prev is None or int(i) == 0:
             if self.verbose:
                 print("WS full PID")
@@ -402,12 +402,12 @@ class Controller_MPC(Controller):
             u_pid_bloc = u_pid[::self.n]
             return u_pid_bloc[:window_len]
 
-        # Cas 2 : truncated (on recycle le plan MPC précédent)
+        # Case 2: truncated (recycle the previous MPC plan)
         if self.verbose:
             print("WS truncated")
         u_prev_bloc = jnp.asarray(u_window_prev, dtype=jnp.float64)[::self.n]
 
-        # Si on a au moins 2 blocs, on enlève le premier ; sinon on garde le dernier (unique)
+        # If we have at least 2 blocks, drop the first; otherwise keep the last (single) one
         base = u_prev_bloc[1:] if u_prev_bloc.size > 1 else u_prev_bloc[-1:]
 
         needed = max(window_len - base.shape[0], 0)
@@ -421,12 +421,12 @@ class Controller_MPC(Controller):
 
     def _estimate_state(self, x_prev, y_meas):
         """
-        Estimation minimale de l'état interne du MPC.
+        Minimal estimation of the MPC internal state.
 
-        - `y_meas` est une mesure, pas l'état : on le reçoit mais on
-          ne l'utilise pas pour l'instant.
-        - L'état interne reste purement open-loop :
-            * si `x_prev` existe, on le conserve tel quel
+        - `y_meas` is a measurement, not the state: we receive it but do not
+          use it for now.
+        - The internal state remains purely open-loop:
+            * if `x_prev` exists, keep it as-is
         """
         return jnp.asarray(x_prev, dtype=jnp.float64)
 
@@ -469,7 +469,7 @@ class Controller_MPC(Controller):
         horizon_len = end_idx - i
         window_len = int(np.ceil(horizon_len / max(n, 1)))
         
-        # On ne tente un MPC que si on a au moins 2 points de grille
+        # Only attempt MPC if we have at least 2 grid points
         recompute = (i % n == 0) and (horizon_len >= 2)
 
         if recompute:
@@ -511,11 +511,11 @@ class Controller_MPC(Controller):
             u_np = np.asarray(u_window)
             ctrl_state["latest_forecast"] = {
                 "time": np.asarray(t_pred),
-                # Clés attendues par Simulation.run_numpy (mpc_logs)
+                # Keys expected by Simulation.run_numpy (mpc_logs)
                 "y": y_np,
                 "u": u_np,
                 "x": x_np,
-                # Compat: anciennes clés utilisées ailleurs
+                # Compat: old keys used elsewhere
                 "x_plan_window": x_np,
                 "y_plan_window": y_np,
                 "u_plan_window": u_np,
@@ -528,7 +528,7 @@ class Controller_MPC(Controller):
         ctrl_state["u_prev"] = u_mpc
         ctrl_state["u_window"] = u_window
 
-        # --- Avance d'un pas avec sim.run et x0/time_grid ---
+        # --- Advance one step with sim.run and x0/time_grid ---
         dt_val = float(dt) if dt is not None else float(self.sim.time_grid[1] - self.sim.time_grid[0])
         d_step = {k: jnp.asarray(v, dtype=jnp.float64) for k, v in (disturbances or {}).items()}
         u_step = {
@@ -552,17 +552,17 @@ class Controller_MPC(Controller):
 
         cost = float(ctrl_state.get("last_cost", 0.0))
         msg = (
-            f"MPC | Index : {idx} | X_MPC : {x_i[0]} | "
-            f"u_mpc : {float(u_arr):.2f} | Cost : {float(cost):.2f} | "
-            f"Tset : {float(tset_display):.2f} | "
-            f"Y_meas : {y_measurements[0]}"
+            f"MPC | Index: {idx} | X_MPC: {x_i[0]} | "
+            f"u_mpc: {float(u_arr):.2f} | Cost: {float(cost):.2f} | "
+            f"Tset: {float(tset_display):.2f} | "
+            f"Y_meas: {y_measurements[0]}"
         )
         ctrl_state["last_log"] = msg
         if self.verbose:
             print(msg)
 
         return {"oveHeaPumY_u": u_arr, "oveHeaPumY_activate": 1.0}, ctrl_state
-        #Pour un MPC, ctrl_state contient l'état interne du MPC (i, x_i, u_prev, u_window, last_log, latest_forecast)
+        # For an MPC, ctrl_state contains the MPC internal state (i, x_i, u_prev, u_window, last_log, latest_forecast)
 
 
 __all__ = [

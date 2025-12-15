@@ -30,7 +30,7 @@ from Identification.Utils import initial_stateRC5
 
 
 def optimize_theta_initial(popsize=8, maxiter=10, seed=None):
-    """Recherche un theta_initial optimisé via DE, puis retourne theta et coût."""
+    """Search for an optimized theta_initial via DE, then return theta and cost."""
     dataset = SimulationDataset.from_csv(
         TRAIN_CSV,
         control_cols=CONTROL_COLS,
@@ -42,7 +42,7 @@ def optimize_theta_initial(popsize=8, maxiter=10, seed=None):
     out_dir.mkdir(parents=True, exist_ok=True)
 
     def save_top3_live(hall):
-        """Sauvegarde en continu le top-10 DE en texte."""
+        """Continuously save the top-10 DE candidates as text."""
         if not hall:
             return
         top = hall[:10]
@@ -57,8 +57,8 @@ def optimize_theta_initial(popsize=8, maxiter=10, seed=None):
                     f.write(f"{label} = {float(vec[i]):.6g}\n")
                 f.write("\n")
 
-    # best_de : coût utilisé par DE (repondéré)
-    # best_lm : coût LM pur (Value = 0.5 * loss_final)
+    # best_de: cost used by DE (reweighted)
+    # best_lm: pure LM cost (Value = 0.5 * loss_final)
     log_state = {"eval": 0, "best_de": math.inf, "best_lm": math.inf, "hall": [], "archive": {}}
     cb_state = {"nit": 0}
 
@@ -109,32 +109,32 @@ def optimize_theta_initial(popsize=8, maxiter=10, seed=None):
         iterations = int(metrics.get("iterations", 1))
         status = metrics.get("opt_status", "")
 
-        # Coût LM pur (Value du LM) : 0.5 * ||res||^2 si fini, sinon pénalité.
+        # Pure LM cost (LM's Value): 0.5 * ||res||^2 if finite, otherwise a penalty.
         if math.isfinite(raw_cost):
             cost_lm = 0.5 * float(raw_cost)
         else:
             cost_lm = 1e6
 
-        # Détection d'un gradient NaN / optimisation dégénérée
+        # Detect NaN gradient / degenerate optimization
         nan_grad = not math.isfinite(opt_err)
         if nan_grad:
-            # Cas 1 : gradient non défini -> optimisation dégénérée,
-            # on inflige une forte pénalité, un peu atténuée si beaucoup d'itérations.
+            # Case 1: undefined gradient -> degenerate optimization,
+            # apply a strong penalty, slightly reduced if there were many iterations.
             denom = max(iterations, 1)
             base = float(raw_cost) if math.isfinite(raw_cost) else 1e3
             cost_de = (1e3 * base) / float(denom)
         elif not math.isfinite(raw_cost):
-            # Cas 2 : coût non fini mais gradient défini -> trajectoire numériquement instable,
-            # on met une très grosse pénalité fixe.
-            cost_de = 1e6  # grosse pénalité mais valeur finie
+            # Case 2: non-finite cost but finite gradient -> numerically unstable trajectory,
+            # apply a very large fixed penalty.
+            cost_de = 1e6  # large penalty but finite value
         else:
-            # Cas "normal" : coût fini et gradient défini -> on utilise une repondération
-            # cost_lm * (tol_grad / grad) pour encourager les gradients encore élevés,
-            # en restant sur la même échelle que le coût LM (évite le facteur 2 systématique).
+            # "Normal" case: finite cost and finite gradient -> use a reweighting
+            # cost_lm * (tol_grad / grad) to encourage still-large gradients,
+            # while staying on the same scale as the LM cost (avoids a systematic factor 2).
             base = float(cost_lm)
             tol_grad = float(ident.tol)
             ratio = tol_grad / max(opt_err, tol_grad)
-            cost_de = base * max(ratio, 0.5)  # On bride à 50% pour ne pas trop favoriser les gros gradients par rapport au coût qui reste l'objectif n°1.
+            cost_de = base * max(ratio, 0.5)  # Cap at 50% to avoid over-favoring large gradients vs the cost, which remains objective #1.
 
         best_de = log_state["best_de"]
         best_lm = log_state["best_lm"]
@@ -143,7 +143,7 @@ def optimize_theta_initial(popsize=8, maxiter=10, seed=None):
         vec_arr = jnp.asarray(vec, dtype=jnp.float64)
         vec_np = np.asarray(vec_arr, dtype=float)
 
-        # Mise à jour d'un petit "hall of fame" global (top 10, trié sur le coût LM).
+        # Update a small global "hall of fame" (top 10, sorted by LM cost).
         hall = log_state.setdefault("hall", [])
         if math.isfinite(cost_lm):
             entry = (float(cost_lm), float(cost_de), int(eval_idx), vec_np)
@@ -153,7 +153,7 @@ def optimize_theta_initial(popsize=8, maxiter=10, seed=None):
                 del hall[10:]
             if entry in hall:
                 save_top3_live(hall)
-        # Archive complète des vecteurs pour retrouver theta a posteriori
+        # Full archive of vectors to recover theta a posteriori
         log_state.setdefault("archive", {})[int(eval_idx)] = vec_np
         named = ", ".join(f"{labels[i]}={float(vec_arr[i]):.4g}" for i in range(dim))
 
@@ -166,10 +166,10 @@ def optimize_theta_initial(popsize=8, maxiter=10, seed=None):
         print(f"[DE] theta: {named}")
         print("================================\n")
 
-        # Affichage du top 3 global juste après le log courant.
+        # Print the global top 3 right after the current log.
         hall = log_state.get("hall") or []
         if hall:
-            print("[DE] Top 3 pistes (global) :")
+            print("[DE] Top 3 candidates (global):")
             for rank, (c_lm, c_de, eval_hall, _) in enumerate(hall, 1):
                 print(f"   #{rank} eval={eval_hall} value_lm={c_lm:.6g} cost_de={c_de:.6g}")
             print("")
@@ -182,7 +182,7 @@ def optimize_theta_initial(popsize=8, maxiter=10, seed=None):
         return cost_de
 
     def de_callback(xk, convergence):
-        """Callback SciPy, appelé une fois par génération DE. Affiche nit réel."""
+        """SciPy callback, called once per DE generation. Prints the real nit."""
         cb_state["nit"] += 1
         nit = cb_state["nit"]
         print(
@@ -193,11 +193,11 @@ def optimize_theta_initial(popsize=8, maxiter=10, seed=None):
         return False
 
     # theta0_vec = np.array([float(THETA_INIT_RC5[s][k]) for s, k in PARAM_ORDER], dtype=float)
-    # sigma = 0.2  # perturbation plus douce
+    # sigma = 0.2  # gentler perturbation
     # noise = sigma * np.random.randn(popsize, dim)
     # init_pop = theta0_vec * (1.0 + noise)
 
-    # Bornes physiques issues de BOUNDS_RC5, alignées sur PARAM_ORDER
+    # Physical bounds from BOUNDS_RC5, aligned with PARAM_ORDER
     bounds = []
     for section, key in PARAM_ORDER:
         b = BOUNDS_RC5_S[section][key]
@@ -217,10 +217,10 @@ def optimize_theta_initial(popsize=8, maxiter=10, seed=None):
         #init=init_pop,
         
     )
-    print(f"[DE] Terminé: nit={getattr(result, 'nit', None)}  nfev={getattr(result, 'nfev', None)}")
+    print(f"[DE] Done: nit={getattr(result, 'nit', None)}  nfev={getattr(result, 'nfev', None)}")
     hall = log_state.get("hall") or []
     if hall:
-        print("\n[DE] Classement final (Top 3) :")
+        print("\n[DE] Final ranking (Top 3):")
         for rank, (c_lm, c_de, eval_hall, _) in enumerate(hall, 1):
             print(f"   #{rank} eval={eval_hall} value_lm={c_lm:.6g} cost_de={c_de:.6g}")
     best_vec = jnp.asarray(result.x, dtype=jnp.float64)

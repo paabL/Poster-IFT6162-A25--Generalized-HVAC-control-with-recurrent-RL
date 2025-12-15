@@ -57,18 +57,18 @@ def _collect_entries(base_dict, curr_dict):
 
 def _export_thetas_markdown(base_theta, thetas):
     lines = [
-        "# Paramètres des modèles RC5",
+        "# RC5 model parameters",
         "",
-        f"Nombre de modèles : {len(thetas)}",
+        f"Number of models: {len(thetas)}",
         "",
     ]
 
     for idx, theta_i in enumerate(thetas):
         entries = _collect_entries(base_theta, theta_i)
-        header = f"## Modèle {idx}"
+        header = f"## Model {idx}"
         lines.append(header)
         lines.append("")
-        lines.append("| Paramètre | Valeur | Δ rel. vs base | Unité |")
+        lines.append("| Parameter | Value | Relative Δ vs base | Unit |")
         lines.append("|-----------|--------|----------------|-------|")
         for name, c, rel, unit in entries:
             rel_str = f"{rel:+.1%}"
@@ -81,9 +81,9 @@ def _export_thetas_markdown(base_theta, thetas):
 
 
 def build_thetas(n_buildings: int = 10, noise_level: float = 0.05, seed: int = 0):
-    """Crée une liste de thetas légèrement perturbés autour du modèle identifié."""
+    """Create a list of slightly perturbed thetas around the identified model."""
     base_theta = rc5.sim_opti_loaded.model.theta
-    # On ne perturbe que la partie thermique "th", la PAC reste fixe.
+    # Only perturb the thermal part ("th"); keep the heat pump (pac) fixed.
     base_th = base_theta["th"]
     flat, unravel = ravel_pytree(base_th)
     flat = np.asarray(flat, dtype=np.float64)
@@ -98,7 +98,7 @@ def build_thetas(n_buildings: int = 10, noise_level: float = 0.05, seed: int = 0
             th_i = unravel(jnp.asarray(flat * (1.0 + eps), dtype=jnp.float64))
             theta_i = {"th": th_i, "pac": base_theta["pac"]}
             thetas.append(theta_i)
-    # Export Markdown une fois pour toutes à la création des modèles
+    # Export Markdown once when creating the models
     _export_thetas_markdown(base_theta, thetas)
     return thetas
 
@@ -113,7 +113,7 @@ def build_k_models(
 
 
 class RandomThetaWrapper(gym.Wrapper):
-    """Tire un theta à chaque reset et l'injecte dans env.theta."""
+    """Sample a theta at each reset and inject it into env.theta."""
 
     def __init__(self, env, thetas, seed: int = 0, fixed_building_idx: int | None = None):
         super().__init__(env)
@@ -131,7 +131,7 @@ class RandomThetaWrapper(gym.Wrapper):
 
 
 class KModelWrapper(gym.Wrapper):
-    """Sélectionne un modèle (k, theta) pré-construit par épisode (random ou fixe)."""
+    """Select a pre-built (k, theta) model per episode (random or fixed)."""
 
     def __init__(
         self,

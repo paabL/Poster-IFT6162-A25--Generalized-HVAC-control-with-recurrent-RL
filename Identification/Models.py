@@ -12,23 +12,23 @@ PAC_TCN_K = 273.15 + 35.0
 #1 - RC5
 
 def Qc_dot(Tc, Ta, u_hp, pac):
-    """Puissance condensateur de la PAC.
+    """Heat pump condenser power.
 
-    Paramètres
+    Parameters
     ----------
     Tc : jnp.ndarray
-        Température côté condenseur [K].
+        Condenser-side temperature [K].
     Ta : jnp.ndarray
-        Température d'air extérieur [K].
+        Outdoor air temperature [K].
     u_hp : jnp.ndarray
-        Signal de modulation de la PAC [-].
+        Heat pump modulation signal [-].
     pac : dict
-        Paramètres de la carte PAC (a_c, b_c, c_c, k_c, etc.).
+        Heat pump map parameters (a_c, b_c, c_c, k_c, etc.).
 
-    Retour
+    Returns
     ------
     jnp.ndarray
-        Puissance thermique délivrée au condenseur [W].
+        Thermal power delivered at the condenser [W].
     """
     T_cn = pac.get("Tcn", PAC_TCN_K)
     T_an = pac.get("Tan", PAC_TAN_K)
@@ -38,23 +38,23 @@ def Qc_dot(Tc, Ta, u_hp, pac):
 
 
 def Qe_dot(Tc, Ta, u_hp, pac):
-    """Puissance évaporateur de la PAC (signe opposé à Qc_dot).
+    """Heat pump evaporator power (opposite sign of Qc_dot).
 
-    Paramètres
+    Parameters
     ----------
     Tc : jnp.ndarray
-        Température côté condenseur [K].
+        Condenser-side temperature [K].
     Ta : jnp.ndarray
-        Température d'air extérieur [K].
+        Outdoor air temperature [K].
     u_hp : jnp.ndarray
-        Signal de modulation de la PAC [-].
+        Heat pump modulation signal [-].
     pac : dict
-        Paramètres de la carte PAC.
+        Heat pump map parameters.
 
-    Retour
+    Returns
     ------
     jnp.ndarray
-        Puissance thermique absorbée à l'évaporateur [W] (signée négativement).
+        Thermal power absorbed at the evaporator [W] (returned with a negative sign).
     """
     T_cn = pac.get("Tcn", PAC_TCN_K)
     T_an = pac.get("Tan", PAC_TAN_K)
@@ -64,29 +64,29 @@ def Qe_dot(Tc, Ta, u_hp, pac):
 
 
 def RC5_state_derivative(state, theta, Ta, Q_solar, Q_con, Q_rad, u_hp):
-    """Dynamique continue du modèle RC5.
+    """Continuous dynamics of the RC5 model.
 
-    Paramètres
+    Parameters
     ----------
     state : jnp.ndarray
-        État thermique [Tz, Tw, Ti, Tf, Tc] en K.
+        Thermal state [Tz, Tw, Ti, Tf, Tc] in K.
     theta : dict
-        Paramètres thermiques et PAC (sous-dictionnaires 'th' et 'pac').
+        Thermal + heat pump parameters (sub-dicts 'th' and 'pac').
     Ta : jnp.ndarray
-        Température extérieure [K].
+        Outdoor temperature [K].
     Q_solar : jnp.ndarray
-        Flux solaire global incident [W].
+        Global incident solar flux [W].
     Q_con : jnp.ndarray
-        Gains internes convectifs [W].
+        Convective internal gains [W].
     Q_rad : jnp.ndarray
-        Gains internes radiatifs [W].
+        Radiative internal gains [W].
     u_hp : jnp.ndarray
-        Signal de modulation de la PAC [-].
+        Heat pump modulation signal [-].
 
-    Retour
+    Returns
     ------
     jnp.ndarray
-        Dérivée temporelle de l'état (dTz/dt, dTw/dt, dTi/dt, dTf/dt, dTc/dt).
+        Time derivative of the state (dTz/dt, dTw/dt, dTi/dt, dTf/dt, dTc/dt).
     """
     th = theta["th"]
     pac = theta["pac"]
@@ -109,23 +109,23 @@ def RC5_state_derivative(state, theta, Ta, Q_solar, Q_con, Q_rad, u_hp):
 
 
 def rc5_state_fn(x, u, d, theta):
-    """Wrapper générique RC5 pour `Model_JAX.state_fn`.
+    """Generic RC5 wrapper for `Model_JAX.state_fn`.
 
-    Paramètres
+    Parameters
     ----------
     x : jnp.ndarray
-        État thermique [Tz, Tw, Ti, Tf, Tc] en K.
+        Thermal state [Tz, Tw, Ti, Tf, Tc] in K.
     u : Mapping[str, Any]
-        Commandes de contrôle (contient typiquement 'oveHeaPumY_u').
+        Control commands (typically contains 'oveHeaPumY_u').
     d : Mapping[str, Any]
-        Perturbations (Ta, Q_solar, gains internes, ...).
+        Disturbances (Ta, Q_solar, internal gains, ...).
     theta : dict
-        Paramètres du modèle RC5.
+        RC5 model parameters.
 
-    Retour
+    Returns
     ------
     jnp.ndarray
-        Dérivée continue de l'état.
+        Continuous state derivative.
     """
     u_hp = jnp.asarray(u["oveHeaPumY_u"])
     Q_con = jnp.asarray(d["InternalGainsCon[1]"])
@@ -136,7 +136,7 @@ def rc5_state_fn(x, u, d, theta):
 
 
 def rc5_qc_dot(x, u, d, theta):
-    """Puissance condensateur vue depuis l'état x (wrapper pour Qc_dot)."""
+    """Condenser power from state x (wrapper for Qc_dot)."""
     state = jnp.asarray(x)
     return Qc_dot(
         state[-1],  # Tc
@@ -147,7 +147,7 @@ def rc5_qc_dot(x, u, d, theta):
 
 
 def rc5_qe_dot(x, u, d, theta):
-    """Puissance évaporateur vue depuis l'état x (wrapper pour Qe_dot)."""
+    """Evaporator power from state x (wrapper for Qe_dot)."""
     state = jnp.asarray(x)
     return Qe_dot(
         state[-1],  # Tc
@@ -158,23 +158,23 @@ def rc5_qe_dot(x, u, d, theta):
 
 
 def rc5_output_fn(x, u, d, theta):
-    """Fonction d'observation RC5 : renvoie (Tz, Qc_dot, Qe_dot).
+    """RC5 observation function: returns (Tz, Qc_dot, Qe_dot).
 
-    Paramètres
+    Parameters
     ----------
     x : jnp.ndarray
-        État thermique [Tz, Tw, Ti, Tf, Tc] en K.
+        Thermal state [Tz, Tw, Ti, Tf, Tc] in K.
     u : Mapping[str, Any]
-        Commandes de contrôle.
+        Control commands.
     d : Mapping[str, Any]
-        Perturbations.
+        Disturbances.
     theta : dict
-        Paramètres du modèle.
+        Model parameters.
 
-    Retour
+    Returns
     ------
     tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]
-        Température de zone [K], puissance condenseur [W], puissance évaporateur [W].
+        Zone temperature [K], condenser power [W], evaporator power [W].
     """
     state = jnp.asarray(x)
     tz = state[0]
