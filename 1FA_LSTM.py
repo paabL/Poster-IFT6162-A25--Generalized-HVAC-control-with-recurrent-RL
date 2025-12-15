@@ -63,6 +63,7 @@ EXTRACTOR_CFG = dict(
 
 PPO_LR_START = 1e-4
 PPO_LR_END = 5e-5
+SAVE_EVERY_STEPS = 1_000_000
 
 
 def lr_schedule(progress_remaining: float) -> float:
@@ -141,6 +142,18 @@ def build_model(env, policy_kwargs):
         tensorboard_log=PPO_CFG["tensorboard_log"],
     )
 
+def make_save_cb(*, every_steps: int, model_path: str, venv, vecnorm_path: str):
+    next_save = [every_steps]
+
+    def _cb(_locals, _globals):
+        if _locals["self"].num_timesteps >= next_save[0]:
+            _locals["self"].save(model_path)
+            venv.save(vecnorm_path)
+            next_save[0] += every_steps
+        return True
+
+    return _cb
+
 
 if __name__ == "__main__":
     set_global_seed(CFG["seed"])
@@ -167,6 +180,12 @@ if __name__ == "__main__":
             total_timesteps=CFG["total_timesteps"],
             tb_log_name=tb_log_name,
             reset_num_timesteps=False,
+            callback=make_save_cb(
+                every_steps=SAVE_EVERY_STEPS,
+                model_path=CFG["model_path"],
+                venv=venv,
+                vecnorm_path=CFG["vecnorm_path"],
+            ),
         )
     else:
         venv = VecNormalize(venv, **VECNORM_CFG)
@@ -193,6 +212,12 @@ if __name__ == "__main__":
         model.learn(
             total_timesteps=CFG["total_timesteps"],
             tb_log_name=tb_log_name,
+            callback=make_save_cb(
+                every_steps=SAVE_EVERY_STEPS,
+                model_path=CFG["model_path"],
+                venv=venv,
+                vecnorm_path=CFG["vecnorm_path"],
+            ),
         )
         model.save(CFG["model_path"])
         venv.save(CFG["vecnorm_path"])
