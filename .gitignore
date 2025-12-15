@@ -1,22 +1,12 @@
 # macOS
 .DS_Store
-.AppleDouble
-.LSOverride
-Icon?
 
-# Python bytecode / caches
+# Python
 __pycache__/
 *.py[cod]
-*$py.class
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-.tox/
-.nox/
-*.egg-info/
-.eggs/
-build/
-dist/
 
 # Virtual environments
 .venv/
@@ -32,11 +22,8 @@ env/
 
 # Logs / artifacts (ML)
 tensorboard_logs/
-lightning_logs/
 wandb/
-mlruns/
-runs/
-checkpoints/
+vecnormalize_stats*
 
 # Misc
 *.log
