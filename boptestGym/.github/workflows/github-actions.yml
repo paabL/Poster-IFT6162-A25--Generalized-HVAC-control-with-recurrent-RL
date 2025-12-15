@@ -1,0 +1,69 @@
+name: CI of BOPTEST-Gym using GitHub Actions
+on:
+  push:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+jobs:
+  test-local:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: testing
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v3
+      - name: Pull boptestgym image from registry
+        run: make pull-boptestgym
+      - name: Install Docker Compose
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y docker-compose
+      - name: Test local version
+        run: make test-local-in-container
+  test-multiaction:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: testing
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v3
+      - name: Pull boptestgym image from registry
+        run: make pull-boptestgym
+      - name: Install Docker Compose
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y docker-compose
+      - name: Test multi-action
+        run: make test-multiaction-in-container
+  test-vectorized:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: testing
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v3
+      - name: Pull boptestgym image from registry
+        run: make pull-boptestgym
+      - name: Install Docker Compose
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y docker-compose
+      - name: Test vectorized environment
+        run: make test-vectorized-in-container
+  test-tutorial:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: testing
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v3
+      - name: Pull boptestgym image from registry
+        run: make pull-boptestgym
+      - name: Test tutorial
+        run: make test-tutorial-in-container
+      
