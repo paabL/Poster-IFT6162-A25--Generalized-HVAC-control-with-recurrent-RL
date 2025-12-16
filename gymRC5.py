@@ -355,8 +355,7 @@ class MyMinimalEnv(gym.Env):
 
     def _aggregate_step_features(self, start_idx: int) -> np.ndarray:
         """Return the mean of disturbances/time over one RL step (step_n dataset points)."""
-        start_idx = int(start_idx)
-        end_idx = min(start_idx + self.step_n, self.n)
+        end_idx = start_idx + self.step_n
         rows = self._dist_matrix[start_idx:end_idx]
         # Replace dataset Qcd by simulated heat pump power if available
         php_sim = self._sim_php[start_idx:end_idx]
@@ -364,9 +363,6 @@ class MyMinimalEnv(gym.Env):
             rows = rows.copy()
             mask = ~np.isnan(php_sim)
             rows[mask, 4] = php_sim[mask]
-        if rows.size == 0:
-            # Should not happen if idx_min/idx_max are correct
-            return np.zeros((self.n_features_past,), dtype=np.float32)
         return rows.mean(axis=0)
 
     def _build_disturbance_window(self, idx: int) -> np.ndarray:

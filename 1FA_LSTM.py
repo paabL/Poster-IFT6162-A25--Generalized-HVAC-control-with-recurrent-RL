@@ -1,11 +1,9 @@
 # train_rc5_lstm.py
 import random
-from pathlib import Path
 import numpy as np
 import torch
 
 from sb3_contrib import RecurrentPPO
-from stable_baselines3.common.utils import get_latest_run_id
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 from stable_baselines3.common.monitor import Monitor
 
@@ -16,7 +14,7 @@ from features_extractor_rc5 import StepMLPTimeWeightedFuseExtractor
 
 
 CFG = dict(
-    reload=False,
+    reload=True,
     n_envs=4,
     seed=0,
     fixed_model_idx=None,
@@ -34,11 +32,11 @@ ENV_CFG = dict(
     # reward = -(w_energy*energy(€) + w_comfort*comfort(K·h) + w_sat*sat(unit·h))
     # Increasing `w_comfort` => more comfort (fewer violations), often more energy.
     # Increasing `w_energy`  => less energy, often more discomfort.
-    w_energy=4.0,
-    w_comfort=1.0, 
+    w_energy=1.0,
+    w_comfort=1.0/2, 
     # Smooths the comfort penalty near 0 (Huber, in Kelvin).
     # If comfort_huber_k > 0, small violations are penalized less (avoids the agent being "afraid" to get close).
-    comfort_huber_k=0.5,
+    comfort_huber_k=1.0,
     w_sat=0.2,
     w_u=1.0/2*0, # Not used
     w_tz=1.0/(273.15*5)*0, # Not used
@@ -142,19 +140,6 @@ def build_model(env, policy_kwargs):
         tensorboard_log=PPO_CFG["tensorboard_log"],
     )
 
-def make_save_cb(*, every_steps: int, model_path: str, venv, vecnorm_path: str):
-    next_save = [every_steps]
-
-    def _cb(_locals, _globals):
-        if _locals["self"].num_timesteps >= next_save[0]:
-            _locals["self"].save(model_path)
-            venv.save(vecnorm_path)
-            next_save[0] += every_steps
-        return True
-
-    return _cb
-
-
 if __name__ == "__main__":
     set_global_seed(CFG["seed"])
     thetas = build_k_models(KS)
@@ -167,26 +152,17 @@ if __name__ == "__main__":
         venv.norm_obs = VECNORM_CFG["norm_obs"]
         venv.norm_reward = VECNORM_CFG["norm_reward"]
 
-        old = RecurrentPPO.load(CFG["model_path"], env=venv, device=PPO_CFG["device"])
-        model = build_model(venv, old.policy_kwargs)
-        model.set_parameters(old.get_parameters(), exact_match=True)
+        # Minimal: keep the loaded model object (it includes counters + optimizer state).
+        model = RecurrentPPO.load(CFG["model_path"], env=venv, device=PPO_CFG["device"])
 
-        tb_log_name = "PPO_RC5_LSTM_continue"
-        run_id = get_latest_run_id(PPO_CFG["tensorboard_log"], tb_log_name) + 1
-        rollout_dir = Path(PPO_CFG["tensorboard_log"]) / f"{tb_log_name}_{run_id}" / "rollout"
-        venv.env_method("set_rollout_dir", str(rollout_dir))
-
+        tb_log_name = "PPO_RC5_LSTM"
         model.learn(
             total_timesteps=CFG["total_timesteps"],
             tb_log_name=tb_log_name,
             reset_num_timesteps=False,
-            callback=make_save_cb(
-                every_steps=SAVE_EVERY_STEPS,
-                model_path=CFG["model_path"],
-                venv=venv,
-                vecnorm_path=CFG["vecnorm_path"],
-            ),
         )
+        model.save(CFG["model_path"])
+        venv.save(CFG["vecnorm_path"])
     else:
         venv = VecNormalize(venv, **VECNORM_CFG)
 
@@ -205,19 +181,9 @@ if __name__ == "__main__":
                 model.policy.log_std.data.fill_(-1.0)
 
         tb_log_name = "PPO_RC5_LSTM"
-        run_id = get_latest_run_id(PPO_CFG["tensorboard_log"], tb_log_name) + 1
-        rollout_dir = Path(PPO_CFG["tensorboard_log"]) / f"{tb_log_name}_{run_id}" / "rollout"
-        venv.env_method("set_rollout_dir", str(rollout_dir))
-
         model.learn(
             total_timesteps=CFG["total_timesteps"],
             tb_log_name=tb_log_name,
-            callback=make_save_cb(
-                every_steps=SAVE_EVERY_STEPS,
-                model_path=CFG["model_path"],
-                venv=venv,
-                vecnorm_path=CFG["vecnorm_path"],
-            ),
         )
         model.save(CFG["model_path"])
         venv.save(CFG["vecnorm_path"])

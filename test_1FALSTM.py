@@ -12,9 +12,9 @@ from Utils.rc5_multi_theta import KModelWrapper, build_k_models
 
 
 MODEL_PATHS = [
-    Path("Pre_ppo_rc5_1FA_LSTM_HU.zip"),
+    Path("Pre_ppo_rc5_1FA_LSTM_VHE.zip"),
 ]
-VECNORM_PATH = Path("vecnormalize_stats_1FA_LSTM_HU.pkl")
+VECNORM_PATH = Path("vecnormalize_stats_1FA_LSTM_VHE.pkl")
 
 PLOT_PER_KS = True
 KS_INDICES: list[int] | None = None  # e.g.: [0, 3]; None = all
@@ -39,7 +39,7 @@ PLOTS_DIR = Path("plots")
 PAST_STEPS = 0
 FUTURE_STEPS = 12
 WARMUP_STEPS = 4 * 24
-MAX_EPISODE_LENGTH = 24 * 7
+MAX_EPISODE_LENGTH = 24 * 21
 EXCLUDING_PERIODS = None
 
 

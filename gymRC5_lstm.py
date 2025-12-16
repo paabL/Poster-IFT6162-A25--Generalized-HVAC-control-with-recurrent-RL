@@ -31,7 +31,7 @@ class MyMinimalEnvLSTM(MyMinimalEnv):
       1) now      : vector (features at time t) + (current Tz, current setpoint)
       2) forecast : matrix (H, feat) containing "known" future information
 
-    IMPORTANT (your constraint):
+    IMPORTANT (constraint):
       - We DO NOT include occupancy or electricity_price in the forecast
         (you want the model to "predict"/infer them from time, weather, etc.)
       - We do include time features in the forecast:
@@ -41,14 +41,14 @@ class MyMinimalEnvLSTM(MyMinimalEnv):
     NOTE ON "KNOWN" FEATURES
     ============================================================
 
-    In your dataset you have:
+    In the dataset we have:
       - weather (Ta, Qsol)
       - internal gains (Qocc/Qocr)  -> note: this can implicitly contain occupancy
       - comfort bands (Lower/Upper)
       - occupancy, electricity_price
       - cyclic time features
 
-    Here we STRICTLY follow your request:
+    Here we STRICTLY follow :
       - forecast: excludes occupancy + price
       - now: contains the current measurement (including occupancy + price at time t), because the "present is known".
     """
@@ -57,28 +57,24 @@ class MyMinimalEnvLSTM(MyMinimalEnv):
         # Let MyMinimalEnv handle everything related to simulation, reward, warmup, etc.
         super().__init__(*args, past_steps=past_steps, future_steps=future_steps, **kwargs)
 
-        # ------------------------------------------------------------
-        # now = "full features" at time t + (Tz, setpoint)
-        # ------------------------------------------------------------
-        # self._aggregate_step_features(idx) returns the mean over 1 RL step:
-        # full = [Ta, qsol, qocc, qocr, qcd/php, lower, upper, occ, price, time...]
-        #
-        # Its size = self.n_features_past
+        #now = part of the observation at current time t
+        #forecast = part of the observation with future known info (H steps)
+
         self.now_dim = int(self.n_features_past + 2)  # + (tz, sp)
 
         # ------------------------------------------------------------
         # forecast (H, feat): what we provide to the network to anticipate.
         # ------------------------------------------------------------
         # We want "known" future information:
-        #   - weather, setpoints, (optionally internal gains if you consider them known)
+        #   - weather, setpoints, (optionally internal gains)
         #   - time (week_idx, hour_sin/cos, dow_sin/cos, ...)
         # We explicitly exclude:
         #   - occupancy
         #   - electricity_price
         #
         # Simple choice (phys_future):
-        #   Ta, qsol, qocc, qocr  (4)   <- if you want to avoid leaking occupancy, remove qocc/qocr too
-        #   lower, upper          (2)
+        #   Ta, qsol, qocc, qocr  (4)   #TODO: remove qocc/qocr, only in now
+        #   lower, upper          (2)   #TODO: remove lower/upper, only in now 
         #   + time_feats          (n_time_features)
         self.forecast_phys_dim = 4 + 2
         self.forecast_feat_dim = int(self.forecast_phys_dim + self.n_time_features)
@@ -115,10 +111,8 @@ class MyMinimalEnvLSTM(MyMinimalEnv):
           - each row: [Ta, qsol, qocc, qocr, lower, upper, time_feats...]
           - NO occupancy/price in forecast.
         """
-        # ------------------------------------------------------------
         # now
-        # ------------------------------------------------------------
-        full = self._aggregate_step_features(self.idx).astype(np.float32)
+        full = self._aggregate_step_features(self.idx).astype(np.float32) #
         tz = np.float32(self.tz_hist[-1])  # zone temperature "summarized" at the RL step
         sp = np.float32(self.sp_hist[-1])  # setpoint applied at the RL step
         now = np.concatenate([full, np.array([tz, sp], dtype=np.float32)], axis=0)
