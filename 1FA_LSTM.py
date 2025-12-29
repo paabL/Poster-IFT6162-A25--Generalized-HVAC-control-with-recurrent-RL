@@ -35,7 +35,7 @@ ENV_CFG = dict(
     w_energy=1.0,
     w_comfort=1.0/2, 
     # Smooths the comfort penalty near 0 (Huber, in Kelvin).
-    # If comfort_huber_k > 0, small violations are penalized less (avoids the agent being "afraid" to get close).
+    # If comfort_huber_k > 0, small violations are penalized less (avoids the agent being "afraid" to get close, add regularity to the loss).
     comfort_huber_k=1.0,
     w_sat=0.2,
     w_u=1.0/2*0, # Not used
